@@ -20,7 +20,7 @@ async function waitForDom(page, predicate, argument) {
     assert.fail('DOM did not reach the expected state: ' + predicate);
 }
 
-async function openEpg(t, mode = 1, variant = '') {
+async function openEpg(t, mode = 1, variant = '', theme = '') {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, timezoneId: 'UTC' });
     const page = await context.newPage();
     const errors = [];
@@ -31,6 +31,9 @@ async function openEpg(t, mode = 1, variant = '') {
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
         const url = new URL(route.request().url());
+        if (url.origin === 'http://picons.invalid' && url.pathname === '/picon.svg') {
+            return route.fulfill({contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="30"><rect width="50" height="30" fill="white"/></svg>'});
+        }
         if (url.origin !== origin) {
             unexpected.push(url.href);
             return route.abort();
@@ -54,7 +57,7 @@ async function openEpg(t, mode = 1, variant = '') {
                 </script>${fixtures.assetTags}<script>
                     getStatusInfo = function() {};
                     loadeventepg = function(id, ref) { window.eventCalls.push({ id, ref }); };
-                </script></head><body><div id="header"></div>
+                </script></head><body class="${theme}"><div id="header"></div>
                 <ul hidden id="grid-settings">${fixtures.gridSettings}</ul>${fixtures.shell}</body></html>` });
         }
         if (Object.hasOwn(fixtures.assets, url.pathname)) {
@@ -90,7 +93,14 @@ async function openEpg(t, mode = 1, variant = '') {
             assert.ok([fixtures.bouquet, fixtures.otherBouquet].includes(url.searchParams.get('bref')));
             return route.fulfill({ json: { result: true, days: ['2026-09-28', '2026-09-29', '2026-10-05'] } });
         }
-        if (url.pathname === '/picon.png') return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="30"/>' });
+        if (url.pathname === '/picon.png') {
+            if (url.searchParams.get('color') === 'broken') return route.fulfill({ contentType: 'image/png', body: 'invalid image' });
+            const color = url.searchParams.get('color');
+            assert.ok([null, 'white', 'black', 'mixed'].includes(color));
+            const logo = color === 'mixed' ? '<rect width="25" height="30" fill="white"/><rect x="25" width="25" height="30" fill="black"/>' :
+                color ? `<rect x="5" y="5" width="40" height="20" fill="${color}"/>` : '';
+            return route.fulfill({ contentType: 'image/svg+xml', body: `<svg xmlns="http://www.w3.org/2000/svg" width="50" height="30">${logo}</svg>` });
+        }
         unexpected.push(url.href);
         return route.abort();
     });
@@ -141,6 +151,150 @@ async function markerPosition(page, mode) {
 }
 
 async function intervalCount(page) { return page.evaluate(() => window.epgIntervals.size); }
+
+for (const mode of [1, 2]) {
+    for (const theme of ['', 'theme--city-lights', 'theme--neon-blackout']) {
+        test(`Gemeinsamer Picon-Verlauf: Ansicht ${mode}, Theme ${theme || 'hell'}, Bildwechsel und Neuladen`, async t => {
+            const {page} = await openEpg(t, mode, '', theme);
+            const selector = mode === 1 ? '.serviceheader' : '.epg__channel-col';
+            const header = page.locator(selector).first();
+            const fallback = await header.evaluate(node => getComputedStyle(node).backgroundColor);
+            assert.equal(await header.evaluate(node => node.classList.contains('epg__channel--adaptive')), false);
+
+            async function setImage(index, src) {
+                await page.locator(selector).nth(index).locator('img').evaluate((image, src) => { image.src = src; }, src);
+                await waitForDom(page, ({selector, index, src}) => {
+                    const image = document.querySelectorAll(selector)[index].querySelector('img');
+                    return image.getAttribute('src') === src && image.complete;
+                }, {selector, index, src});
+            }
+
+            const luminance = rgb => {
+                const channels = rgb.match(/\d+/g).map(Number).map(value => {
+                    value /= 255;
+                    return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+                });
+                return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+            };
+
+            async function sharedState() {
+                const states = await page.locator(selector).evaluateAll(nodes => nodes.map(node => {
+                    const style = getComputedStyle(node);
+                    return {background: style.backgroundColor, gradient: style.backgroundImage,
+                        highlight: style.getPropertyValue('--epg-channel-highlight').trim(),
+                        foreground: getComputedStyle(node.querySelector('.service, label')).color,
+                        calculated: style.getPropertyValue('--epg-channel-background').trim(),
+                        adaptive: node.classList.contains('epg__channel--adaptive'), shadow: style.boxShadow};
+                }));
+                for (const state of states) assert.deepEqual(state, states[0], 'All channels share the same background and text color');
+                const state = states[0];
+                assert.equal(state.adaptive, true);
+                assert.equal(state.background, state.calculated, 'Background and text switch together');
+                assert.match(state.gradient, /^linear-gradient\(/);
+                assert.ok(state.gradient.includes(state.background) && state.gradient.includes(state.highlight));
+                const shade = Number(state.background.match(/\d+/)[0]);
+                assert.ok(shade >= 150 && shade <= 230, JSON.stringify(state));
+                assert.equal(Number(state.highlight.match(/\d+/)[0]) - shade, 12, 'Only a subtle gradient');
+                for (const stop of [state.background, state.highlight]) {
+                    const background = luminance(stop), foreground = luminance(state.foreground);
+                    assert.ok((Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05) >= 4.5, JSON.stringify(state));
+                }
+                assert.ok(!state.shadow.includes('inset'), 'Theme shadows must not cover the shared gradient');
+                return state;
+            }
+
+            const backgrounds = [];
+            for (const color of ['white', 'black', 'mixed', 'white']) {
+                await setImage(0, '/picon.png?color=' + color);
+                const state = await sharedState();
+                for (const stop of [state.background, state.highlight]) {
+                    const background = luminance(stop);
+                    if (color !== 'black') assert.ok(1.05 / (background + 0.05) >= 2.5, 'Light logos stay visible without dark backgrounds');
+                    if (color !== 'white') assert.ok((background + 0.05) / 0.05 >= 7, 'Dark logos remain visible');
+                }
+                assert.equal(await header.locator('img').isVisible(), true);
+                backgrounds.push(state.background);
+            }
+            assert.notEqual(backgrounds[0], backgrounds[1], 'The shared colors adapt to the loaded pixels');
+            assert.equal(backgrounds[0], backgrounds[3], 'No stale URL-based color cache');
+
+            await setImage(0, '/picon.png?color=black');
+            await setImage(1, '/picon.png?color=white');
+            const combined = await sharedState();
+            assert.notEqual(combined.background, backgrounds[1], 'A second logo influences the shared selection');
+            assert.equal(combined.background, backgrounds[2], 'Opposite logos are balanced just like mixed logo details');
+            if (mode === 2) {
+                const rendered = [];
+                for (const channel of await page.locator(selector).all()) {
+                    const screenshot = await channel.screenshot();
+                    const pixels = await page.evaluate(async png => {
+                        const image = new Image();
+                        image.src = 'data:image/png;base64,' + png;
+                        await image.decode();
+                        const canvas = document.createElement('canvas');
+                        canvas.width = image.width;
+                        canvas.height = image.height;
+                        const context = canvas.getContext('2d');
+                        context.drawImage(image, 0, 0);
+                        const pixel = (x, y) => Array.from(context.getImageData(x, y, 1, 1).data).slice(0, 3);
+                        return {top: pixel(6, 3), bottom: pixel(6, image.height - 4), right: pixel(image.width - 7, 3)};
+                    }, screenshot.toString('base64'));
+                    for (let component = 0; component < 3; component++) {
+                        assert.ok(pixels.top[component] - pixels.bottom[component] >= 10,
+                            'The timeline must visibly render the full gradient over each channel height: ' + JSON.stringify(pixels));
+                        assert.ok(Math.abs(pixels.top[component] - pixels.right[component]) <= 1,
+                            'The timeline gradient must not spread its contrast across the channel width');
+                    }
+                    rendered.push(pixels);
+                }
+                assert.deepEqual(rendered[0], rendered[1], 'All timeline channels render the same gradient');
+            }
+            await setImage(0, '/picon.png?color=white');
+            await setImage(1, '/picon.png?color=black');
+            assert.deepEqual(await sharedState(), combined, 'Selection does not depend on image load order');
+
+            await header.evaluate(node => {
+                node.classList.remove('epg__channel--adaptive');
+                node.style.removeProperty('--epg-channel-background');
+                ModernEpg.init(JSON.parse(document.getElementById('modern-epg').dataset.epgConfig));
+            });
+            assert.deepEqual(await sharedState(), combined, 'Already loaded images are analyzed together on initialization');
+            assert.equal(await intervalCount(page), 1, 'Reinitializing does not leak marker intervals');
+
+            await setImage(0, '/picon.png');
+            assert.equal((await sharedState()).background, backgrounds[1], 'Transparent logos share the remaining logo background');
+            await setImage(0, '/picon.png?color=broken');
+            assert.equal((await sharedState()).background, backgrounds[1], 'Failed logos share the remaining logo background');
+            assert.equal(await header.locator('img').isVisible(), false);
+            await setImage(0, '/picon.png?color=white');
+            assert.deepEqual(await sharedState(), combined);
+            assert.equal(await header.locator('img').isVisible(), true, 'Failed images can recover');
+            await setImage(0, 'http://picons.invalid/picon.svg');
+            assert.equal((await sharedState()).background, backgrounds[1], 'Unreadable cross-origin pixels do not influence the selection');
+            assert.equal(await header.locator('img').isVisible(), true);
+            await setImage(1, '/picon.png');
+            const fallbacks = await page.locator(selector).evaluateAll(nodes => nodes.map(node => ({
+                adaptive: node.classList.contains('epg__channel--adaptive'),
+                background: getComputedStyle(node).backgroundColor,
+                highlight: node.style.getPropertyValue('--epg-channel-highlight')
+            })));
+            for (const state of fallbacks) assert.deepEqual(state, {adaptive: false, background: fallback, highlight: ''}, 'All channels revert together when no readable pixels remain');
+            await setImage(0, '/picon.png?color=black');
+            await sharedState();
+            await navigate(page, '[data-day="1"]', mode, 1);
+            const detachedUpdates = await page.evaluate(selector => {
+                const node = window.previousEpgTable.querySelector(selector);
+                node.style.removeProperty('--epg-channel-background');
+                node.querySelector('img').dispatchEvent(new Event('load'));
+                return node.style.getPropertyValue('--epg-channel-background');
+            }, selector);
+            assert.equal(detachedUpdates, '', 'Image handlers are removed with the old EPG');
+            assert.equal(await page.locator(selector).first().evaluate(node => node.classList.contains('epg__channel--adaptive')), false);
+            await setImage(0, '/picon.png?color=white');
+            await sharedState();
+        });
+    }
+}
 
 test('Zeitstrahl: viele Sendungen behalten Zeitposition und Breite auch ohne Vorgänger', async t => {
     const { page } = await openEpg(t, 2);

@@ -66,6 +66,21 @@ and prime-time timestamps from the server's `slot_start`. `myepg.tmpl` only star
 the surrounding card via `ModernEpg.initShell`. Each AJAX render gets its own
 configuration; removing it disposes intervals, delayed updates and page handlers.
 
+Both modern EPG views calculate one shared, subtle gradient for all channel
+headers from all loaded picons, rather than channel-specific colors or a fixed
+light/dark preset. Each logo has equal influence regardless of image size. The
+contrast calculation emphasizes poorly visible logo details, ignores transparent
+pixels and accounts for partial transparency at both gradient ends. Gray values
+are restricted to 150–230 with a 12-level highlight to avoid dark backgrounds;
+this balances logo visibility rather than guaranteeing contrast for every logo.
+The timeline applies the gradient vertically so its full brightness difference
+remains visible across the short channel rows; the magazine keeps its diagonal gradient.
+Channel names have at least 4.5:1 contrast across the gradient. Image loads and
+source changes recalculate the shared colors; missing, empty or canvas-inaccessible
+images do not influence the result but receive the same background as all other
+channels. If no usable pixels remain, all headers retain the theme's original
+styling. Image listeners and observers are disposed with the EPG.
+
 The modern main template loads the generated styles and scripts once, with
 `epgtime.min.js` before `responsive-multiepg.min.js`. Rebuild the modern JS and CSS
 after editing their sources and include the generated assets when distributing

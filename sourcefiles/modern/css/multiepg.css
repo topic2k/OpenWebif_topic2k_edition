@@ -5,6 +5,7 @@
 .modern-epg .service img { width: 50px; height: 30px; float: none; margin-right: 10px; border: 0; }
 .modern-epg .serviceheader { position: sticky; top: 0; z-index: 10; padding: 10px; width: 190px; text-align: center; background-color: #bababa; box-shadow: inset -20px 40px 60px #fff; }
 .theme--city-lights .modern-epg .serviceheader { background-color: #313443; box-shadow: inset -20px 40px 60px #282c37; }
+.modern-epg .serviceheader, .modern-epg .epg__channel-col { transition: none; }
 .modern-epg .event { cursor: pointer; width: 190px; overflow: hidden; }
 .modern-epg .bq { font-size: 12px; padding: 2px 4px; line-height: 18px; cursor: pointer; white-space: nowrap; display: inline-block; margin: 1px 1px 0 0; }
 .modern-epg #bqlist { display: flex !important; flex-wrap: nowrap !important; overflow-x: auto; width: 100%; height: auto; }
@@ -153,3 +154,6 @@
 .theme--city-lights .modern-epg--timeline .event.curevent > a { color: #333; }
 .theme--city-lights .modern-epg--timeline .ename, .theme--city-lights .modern-epg--timeline .etimesmall, .theme--city-lights .modern-epg--timeline .etime { color: inherit; }
 .modern-epg--timeline .event > .epg__tooltip-details { display: none; }
+.modern-epg .serviceheader.epg__channel--adaptive, .modern-epg--timeline .epg__channel-col.epg__channel--adaptive { background-color: var(--epg-channel-background); background-image: linear-gradient(135deg, var(--epg-channel-highlight), var(--epg-channel-background)); color: var(--epg-channel-foreground); box-shadow: none; }
+.modern-epg--timeline .epg__channel-col.epg__channel--adaptive { background-image: linear-gradient(to bottom, var(--epg-channel-highlight), var(--epg-channel-background)); box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.2); }
+.modern-epg .epg__channel--adaptive .service, .modern-epg .epg__channel--adaptive label { color: inherit; }

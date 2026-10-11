@@ -96,6 +96,146 @@ var reloadTimers = false;
 		return first[to] + (value - first[from]) / (last[from] - first[from]) * (last[to] - first[to]);
 	}
 
+	function epgPiconColors(pixels) {
+		var linear = [];
+		for (var channel = 0; channel < 256; channel++) {
+			var value = channel / 255;
+			linear.push(value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4));
+		}
+		var histogram = {};
+		pixels.forEach(function(picon) {
+			var entries = {}, weight = 0;
+			for (var index = 0; index < picon.length; index += 4) {
+				var alpha = picon[index + 3] / 255;
+				if (alpha < 0.125) continue;
+				var red = picon[index], green = picon[index + 1], blue = picon[index + 2];
+				var luminance = 0.2126 * linear[red] + 0.7152 * linear[green] + 0.0722 * linear[blue];
+				var key = Math.round(luminance * 31) * 8 + Math.round(alpha * 7);
+				var bin = entries[key] || (entries[key] = {red: 0, green: 0, blue: 0, alpha: 0, weight: 0});
+				bin.red += red * alpha;
+				bin.green += green * alpha;
+				bin.blue += blue * alpha;
+				bin.alpha += alpha * alpha;
+				bin.weight += alpha;
+				weight += alpha;
+			}
+			// Give each logo equal influence, independent of size and transparent margins.
+			Object.keys(entries).forEach(function(key) {
+				var bin = entries[key];
+				var combined = histogram[key] || (histogram[key] = {red: 0, green: 0, blue: 0, alpha: 0, weight: 0});
+				combined.red += bin.red / weight;
+				combined.green += bin.green / weight;
+				combined.blue += bin.blue / weight;
+				combined.alpha += bin.alpha / weight;
+				combined.weight += bin.weight / weight;
+			});
+		});
+		var bins = Object.keys(histogram).map(function(key) {
+			var bin = histogram[key];
+			bin.red /= bin.weight;
+			bin.green /= bin.weight;
+			bin.blue /= bin.weight;
+			bin.alpha /= bin.weight;
+			return bin;
+		});
+		if (!bins.length) return null;
+		var bestShade = 150, bestPenalty = Infinity;
+		// Keep the shared gradient light enough and evaluate contrast at both ends.
+		for (var shade = 150; shade <= 230; shade++) {
+			var penalty = 0;
+			bins.forEach(function(bin) {
+				for (var stop = shade; stop <= shade + 12; stop += 12) {
+					var backgroundPart = stop * (1 - bin.alpha);
+					var composite = 0.2126 * linear[Math.round(bin.red * bin.alpha + backgroundPart)] +
+						0.7152 * linear[Math.round(bin.green * bin.alpha + backgroundPart)] +
+						0.0722 * linear[Math.round(bin.blue * bin.alpha + backgroundPart)];
+					var contrast = (Math.max(composite, linear[stop]) + 0.05) / (Math.min(composite, linear[stop]) + 0.05);
+					penalty += bin.weight / (contrast * contrast * contrast * contrast);
+				}
+			});
+			if (penalty < bestPenalty) {
+				bestPenalty = penalty;
+				bestShade = shade;
+			}
+		}
+		return {
+			background: 'rgb(' + bestShade + ', ' + bestShade + ', ' + bestShade + ')',
+			highlight: 'rgb(' + (bestShade + 12) + ', ' + (bestShade + 12) + ', ' + (bestShade + 12) + ')',
+			foreground: (linear[bestShade] + 0.05) / 0.05 >= 1.05 / (linear[bestShade] + 0.05) ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)'
+		};
+	}
+
+	function startEpgPiconContrast(container) {
+		var active = true;
+		var images = Array.from(container.querySelectorAll('.serviceheader img, .epg__channel-col .picon img'));
+		var headers = Array.from(container.querySelectorAll('.serviceheader, .epg__channel-col'));
+		var samples = new Map();
+		var pending = true;
+		function applyColors() {
+			pending = false;
+			if (!active) return;
+			var colors = epgPiconColors(Array.from(samples.values()));
+			headers.forEach(function(header) {
+				if (colors) {
+					header.style.setProperty('--epg-channel-background', colors.background);
+					header.style.setProperty('--epg-channel-highlight', colors.highlight);
+					header.style.setProperty('--epg-channel-foreground', colors.foreground);
+					header.classList.add('epg__channel--adaptive');
+				} else {
+					header.classList.remove('epg__channel--adaptive');
+					header.style.removeProperty('--epg-channel-background');
+					header.style.removeProperty('--epg-channel-highlight');
+					header.style.removeProperty('--epg-channel-foreground');
+				}
+			});
+		}
+		function update() {
+			if (!active || !container.contains(this)) return;
+			samples.delete(this);
+			if (this.complete) {
+				this.style.display = this.naturalWidth ? '' : 'none';
+				if (this.naturalWidth && this.naturalHeight) {
+					try {
+						var canvas = document.createElement('canvas');
+						var scale = Math.min(1, 64 / Math.max(this.naturalWidth, this.naturalHeight));
+						canvas.width = Math.max(1, Math.round(this.naturalWidth * scale));
+						canvas.height = Math.max(1, Math.round(this.naturalHeight * scale));
+						var context = canvas.getContext('2d', {willReadFrequently: true});
+						if (context) {
+							context.drawImage(this, 0, 0, canvas.width, canvas.height);
+							samples.set(this, context.getImageData(0, 0, canvas.width, canvas.height).data);
+						}
+					} catch (error) {
+						// Unreadable images do not influence the shared background.
+					}
+				}
+			}
+			if (!pending) {
+				pending = true;
+				Promise.resolve().then(applyColors);
+			}
+		}
+		var observer = new MutationObserver(function(records) {
+			records.forEach(function(record) { update.call(record.target); });
+		});
+		images.forEach(function(image) {
+			image.addEventListener('load', update);
+			image.addEventListener('error', update);
+			observer.observe(image, {attributes: true, attributeFilter: ['src', 'srcset']});
+			if (image.complete) update.call(image);
+		});
+		applyColors();
+		return function() {
+			active = false;
+			samples.clear();
+			observer.disconnect();
+			images.forEach(function(image) {
+				image.removeEventListener('load', update);
+				image.removeEventListener('error', update);
+			});
+		};
+	}
+
 	function init(config) {
 		if (disposeCurrent) disposeCurrent();
 		var scope = jQuery('#modern-epg');
@@ -103,6 +243,7 @@ var reloadTimers = false;
 		if (!scope.length || !tableNode) return;
 		var disposed = false;
 		var stopMarker;
+		var stopPiconContrast = startEpgPiconContrast(tableNode);
 		var pending = false;
 		var frame;
 		var jumpTimeout;
@@ -119,6 +260,7 @@ var reloadTimers = false;
 		function dispose() {
 			disposed = true;
 			if (stopMarker) stopMarker();
+			stopPiconContrast();
 			clearTimeout(jumpTimeout);
 			clearTimeout(visibleTimeout);
 			hideEpgTooltip();

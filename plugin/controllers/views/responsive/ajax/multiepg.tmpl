@@ -85,7 +85,7 @@
 #set $ref = $channelrefs.get($sname, "")
 #set $qref = $quote($ref, safe=' ~@#$()*!+=:;,.?/\'').replace('%253a//','%3a//')
 				<td class="serviceheader" data-sref="$ref" data-ref="$qref">
-					<div class="service event" data-sref="$ref" data-ref="$qref"><img src="$(picons[$sname])" loading="lazy">$(channelnames[$sname])</div>
+					<div class="service event" data-sref="$ref" data-ref="$qref"><img src="$(picons[$sname])" alt="" loading="lazy">$(channelnames[$sname])</div>
 				</td>
 #end for
 			</tr>
@@ -121,7 +121,7 @@
 		<div class="epg__timeline-row epg__row" data-sref="$ref" data-ref="$qref">
 			<div class="epg__channel-col">
 				<div class="epg__channel">
-					<div class="picon"><img src="$(picons[$sname])" alt="" loading="lazy" onerror="this.style.display='none'"></div>
+					<div class="picon"><img src="$(picons[$sname])" alt="" loading="lazy"></div>
 					<label>$(channelnames[$sname])</label>
 				</div>
 			</div>
