@@ -85,6 +85,30 @@ var reloadTimers = false;
 		return grid;
 	}
 
+	function buildEpgTimelineGrid(start, finish, constraints) {
+		if (!isFinite(start) || !isFinite(finish) || finish <= start) return null;
+		var times = new Set([start, finish]);
+		var endings = {};
+		constraints.forEach(function(event) {
+			times.add(event.start);
+			times.add(event.end);
+			if (!endings[event.end]) endings[event.end] = [];
+			endings[event.end].push(event);
+		});
+		var positions = {};
+		var grid = [];
+		Array.from(times).sort(function(a, b) { return a - b; }).forEach(function(time, index) {
+			var previous = grid[index - 1];
+			var position = previous ? previous.position + EpgTime.timelinePosition(time, previous.time) - 140 : 0;
+			(endings[time] || []).forEach(function(event) {
+				position = Math.max(position, Math.ceil(positions[event.start] + event.width));
+			});
+			positions[time] = position;
+			grid.push({time: time, position: position});
+		});
+		return grid;
+	}
+
 	function epgGuideValue(grid, value, from, to) {
 		var low = 0, high = grid.length - 1;
 		while (high - low > 1) {
@@ -249,6 +273,7 @@ var reloadTimers = false;
 		var jumpTimeout;
 		var visibleTimeout;
 		var guideGrid;
+		var timelineGrid;
 		var tooltipTimeout;
 		var tooltip = jQuery('<div class="epg__tooltip" role="tooltip" id="epg-tooltip" hidden></div>').appendTo(scope)[0];
 		var observer = new MutationObserver(function() {
@@ -277,8 +302,16 @@ var reloadTimers = false;
 		observer.observe(document.body, {childList: true, subtree: true});
 		reloadTimers = false;
 
+		function timelinePosition(time) {
+			return timelineGrid ? 140 + epgGuideValue(timelineGrid, time, 'time', 'position') : EpgTime.timelinePosition(time, config.first);
+		}
+
+		function timelineTimeAt(position) {
+			return timelineGrid ? epgGuideValue(timelineGrid, position - 140, 'position', 'time') : config.first + (position - 140) * 6;
+		}
+
 		function epgTimelineNowPosition() {
-			return EpgTime.timelinePosition(EpgTime.now(), config.first);
+			return timelinePosition(EpgTime.now());
 		}
 
 		function clampTimelineScroll(left) {
@@ -364,6 +397,11 @@ var reloadTimers = false;
 				var first = Number(container.getAttribute('data-first'));
 				var range = EpgTime.timelineWindow(first, container.scrollLeft, container.clientWidth,
 					Number(container.getAttribute('data-timeline-end')));
+				if (timelineGrid) {
+					var visibleStart = Math.max(first, timelineTimeAt(container.scrollLeft + 140));
+					var visibleEnd = Math.min(config.timelineEnd, timelineTimeAt(container.scrollLeft + container.clientWidth));
+					range = visibleEnd > visibleStart ? {start: visibleStart, end: visibleEnd - 1} : null;
+				}
 				if (range) {
 					var start = range.start;
 					addDate(start);
@@ -435,18 +473,28 @@ var reloadTimers = false;
 
 		function layoutTimelineLabels() {
 			if (config.mode !== 2) return;
-			tableNode.querySelectorAll('.epg__timeline-row').forEach(function(row) {
-				var height = 60;
-				var events = row.querySelectorAll('.eventlist .event');
-				events.forEach(function(event) {
-					event.classList.remove('epg__details-hidden');
-					var titleHeight = Math.ceil(event.querySelector('.ename').getBoundingClientRect().height);
-					height = Math.max(height, titleHeight + 6);
-					var time = event.querySelector('.etime');
-					event.classList.toggle('epg__details-hidden', event.querySelector('.epg__timeline-info').getBoundingClientRect().height > 58 ||
-						time.scrollWidth > time.clientWidth);
-				});
-				row.style.setProperty('--epg-row-height', height + 'px');
+			var events = tableNode.querySelectorAll('.eventlist .event[data-begin][data-end]');
+			var constraints = [];
+			events.forEach(function(event) {
+				event.classList.remove('epg__details-hidden');
+				var info = event.querySelector('.epg__timeline-info');
+				info.style.transform = '';
+				info._epgShift = 0;
+				var interval = EpgTime.interval(Number(event.dataset.begin), Number(event.dataset.end), config.first, config.timelineEnd, 6);
+				if (!interval) return;
+				constraints.push({start: interval.start, end: interval.end, width: Math.ceil(event.querySelector('.ename').getBoundingClientRect().width) + 1});
+			});
+			timelineGrid = buildEpgTimelineGrid(config.first, config.timelineEnd, constraints);
+			tableNode.style.setProperty('--epg-timeline-width', timelinePosition(config.timelineEnd) - 140 + 'px');
+			events.forEach(function(event) {
+				var interval = EpgTime.interval(Number(event.dataset.begin), Number(event.dataset.end), config.first, config.timelineEnd, 6);
+				event.style.display = interval ? '' : 'none';
+				if (!interval) return;
+				event.style.left = timelinePosition(interval.start) - 140 + 'px';
+				event.style.width = timelinePosition(interval.end) - timelinePosition(interval.start) + 'px';
+				var time = event.querySelector('.etime');
+				event.classList.toggle('epg__details-hidden', event.querySelector('.epg__timeline-info').getBoundingClientRect().height > 58 ||
+					time.scrollWidth > event.clientWidth);
 			});
 		}
 
@@ -468,7 +516,9 @@ var reloadTimers = false;
 			if (event.target.closest('.epg__timer-marker')) return;
 			var programme = this;
 			var details = programme.querySelector('.epg__desc');
-			if (!programme.classList.contains('epg__details-hidden') && (!details || details.scrollHeight <= details.clientHeight)) return;
+			var timelineDetails = programme.querySelector('.epg__tooltip-details');
+			if (!programme.classList.contains('epg__details-hidden') && (!details || details.scrollHeight <= details.clientHeight) &&
+				(!timelineDetails || !timelineDetails.textContent.trim())) return;
 			tooltipTimeout = setTimeout(function() {
 				if (!alive()) return;
 				var title = programme.querySelector('.epg__title, .ename');
@@ -555,6 +605,7 @@ var reloadTimers = false;
 			updateHourLines();
 			updateCurrentEvents();
 			hideEpgTooltip();
+			updateTimelineNowMarker();
 		}
 		fixTableHeight();
 		updateEpgDateRange();
@@ -579,21 +630,22 @@ var reloadTimers = false;
 			var top = origin.offset().top - container.offset().top + container.scrollTop() + guidePosition(EpgTime.now());
 			marker.css({top: top + 'px', width: jQuery('#tbl1').outerWidth() + 'px'}).show();
 		}
+		function updateTimelineNowMarker() {
+			if (config.mode !== 2 || config.day !== 0 || config.week !== 0) return;
+			var marker = scope.find('.timetable-now');
+			var now = EpgTime.now();
+			updateCurrentEvents();
+			if (now < config.first || now >= config.timelineEnd) {
+				marker.hide();
+				return;
+			}
+			marker.css({left: epgTimelineNowPosition() + 'px', height: scope.find('#tblinner').height()}).show();
+		}
 		if (config.day === 0 && config.week === 0) {
 			if (config.mode === 1) {
 				stopMarker = startEpgNowMarker(scope.find('.epg__tv-guide-now'), updateTvGuideNowMarker);
 			} else {
-				var marker = scope.find('.timetable-now');
-				var inner = scope.find('#tblinner');
-				stopMarker = startEpgNowMarker(marker, function() {
-					var now = EpgTime.now();
-					updateCurrentEvents();
-					if (now < config.first || now >= config.timelineEnd) {
-						marker.hide();
-						return;
-					}
-					marker.css({left: epgTimelineNowPosition() + 'px', height: inner.height()}).show();
-				});
+				stopMarker = startEpgNowMarker(scope.find('.timetable-now'), updateTimelineNowMarker);
 			}
 		} else {
 			scope.find('.timetable-now').css('height', '0').hide();
@@ -737,7 +789,7 @@ var reloadTimers = false;
 							jQuery('#fulltbl').animate({scrollTop: 0}, 500);
 						}
 					} else {
-						var pos = EpgTime.timelinePosition(targetTime, config.first);
+						var pos = timelinePosition(targetTime);
 						var offset = 160;
 						if (d == 0) {
 							var channelWidth = jQuery('.epg__channel-col').first().outerWidth() || 0;

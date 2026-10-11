@@ -152,6 +152,53 @@ async function markerPosition(page, mode) {
 
 async function intervalCount(page) { return page.evaluate(() => window.epgIntervals.size); }
 
+test('Zeitstrahl: gleich hohe Senderzeilen und gemeinsame Zeitgrenzen trotz langer kurzer Titel', async t => {
+    const {page} = await openEpg(t, 2, 'alignment');
+    let initialWidths;
+    async function checkRows() {
+        const rows = await page.locator('.epg__timeline-row').evaluateAll(rows => rows.map(row => ({
+            height: row.getBoundingClientRect().height,
+            channelHeight: row.querySelector('.epg__channel-col').getBoundingClientRect().height,
+            events: Array.from(row.querySelectorAll('.event')).map(event => {
+                const rect = event.getBoundingClientRect(), title = event.querySelector('.ename');
+                return {id: event.dataset.id, left: rect.left, right: rect.right, height: rect.height,
+                    titleFits: title.scrollWidth <= title.clientWidth + 1 &&
+                        title.getBoundingClientRect().bottom <= rect.bottom &&
+                        title.getBoundingClientRect().right <= rect.right + 0.1};
+            })
+        })));
+        assert.equal(rows.length, 2);
+        const widths = rows[0].events.map(event => event.right - event.left);
+        if (!initialWidths) initialWidths = widths;
+        else assert.deepEqual(widths, initialWidths, 'Breiten bleiben nach Größenwechsel und Neuladen stabil');
+        for (const row of rows) {
+            assert.equal(row.height, 60, 'Lange Titel dürfen keine Senderzeile vergrößern');
+            assert.equal(row.channelHeight, 60);
+            for (let index = 0; index < row.events.length; index++) {
+                const event = row.events[index];
+                assert.equal(event.height, 58);
+                assert.ok(event.titleFits, 'Vollständiger Titel bleibt innerhalb der Sendung');
+                assert.equal(event.left, rows[0].events[index].left, 'Gemeinsame Startzeiten bleiben ausgerichtet');
+                assert.equal(event.right, rows[0].events[index].right, 'Gemeinsame Endzeiten bleiben ausgerichtet');
+                if (index) assert.equal(event.left, row.events[index - 1].right, 'Benachbarte Sendungen überlappen nicht');
+            }
+        }
+    }
+    await checkRows();
+    for (const width of [800, 1280]) {
+        await page.setViewportSize({width, height: 900});
+        await page.clock.runFor(200);
+        await checkRows();
+    }
+    await page.evaluate(() => {
+        window.previousEpgTable = document.getElementById('fulltbl');
+        jQuery('#tvcontent').html(loadspinner).load(window.previousEpgTable.dataset.refreshUrl);
+    });
+    await waitForDom(page, () => document.getElementById('fulltbl') && document.getElementById('fulltbl') !== window.previousEpgTable);
+    await page.clock.runFor(200);
+    await checkRows();
+});
+
 for (const mode of [1, 2]) {
     for (const theme of ['', 'theme--city-lights', 'theme--neon-blackout']) {
         test(`Gemeinsamer Picon-Verlauf: Ansicht ${mode}, Theme ${theme || 'hell'}, Bildwechsel und Neuladen`, async t => {
@@ -321,7 +368,7 @@ test('Zeitstrahl: viele Sendungen behalten Zeitposition und Breite auch ohne Vor
 
 async function checkTimelineWidth(page) {
     const geometry = await page.locator('#fulltbl').evaluate(table => {
-        const width = (Number(table.dataset.timelineEnd) - Number(table.dataset.first)) / 6;
+        const width = parseFloat(getComputedStyle(table).getPropertyValue('--epg-timeline-width'));
         return { actual: table.scrollWidth, expected: Math.max(table.clientWidth, width + 140),
             rows: Array.from(table.querySelectorAll('.epg__timeline-row'), row => row.getBoundingClientRect().width) };
     });
@@ -339,7 +386,7 @@ for (const variant of ['geometry', 'long']) {
             const event = Array.from(list.querySelectorAll('[data-end]')).find(event => Number(event.dataset.end) === end);
             const rect = event.getBoundingClientRect();
             return { right: rect.right - list.getBoundingClientRect().left,
-                expected: (end - Number(table.dataset.first)) / 6,
+                expected: parseFloat(getComputedStyle(table).getPropertyValue('--epg-timeline-width')),
                 width: rect.width, begin: Number(event.dataset.begin), end };
         });
         assert.ok(Math.abs(last.right - last.expected) < 0.1, JSON.stringify(last));
@@ -553,7 +600,8 @@ for (const mode of [1, 2]) {
         }
         await checkTitles();
         const short = page.locator('[data-id="4001"]').last();
-        assert.ok(await short.evaluate(event => event.classList.contains('epg__details-hidden')));
+        if (mode === 1) assert.ok(await short.evaluate(event => event.classList.contains('epg__details-hidden')));
+        else assert.equal(await short.locator('.epg__tooltip-details').isVisible(), false);
         await short.locator(titleSelector).hover();
         await page.clock.runFor(1499);
         assert.equal(await page.locator('.epg__tooltip').isVisible(), false);
@@ -780,6 +828,7 @@ for (const mode of [1, 2]) {
             const firstChannel = Array.from(mode === 1 ? document.querySelectorAll('#tbl1body tr td:first-child [data-id]') :
                 document.querySelector('.eventlist').querySelectorAll('[data-id]')).filter(event => Number(event.dataset.id) >= 1100);
             return { clipped: size(document.querySelector('[data-id="1000"]')),
+                clippedTitleWidth: document.querySelector('[data-id="1000"] .ename')?.getBoundingClientRect().width,
                 last: size(document.querySelector('[data-id="1004"]')),
                 spanning: size(document.querySelector('[data-id="1003"]')),
                 events: firstChannel.map(event => {
@@ -788,12 +837,13 @@ for (const mode of [1, 2]) {
                     const title = event.querySelector(mode === 1 ? '.epg__title' : '.ename').getBoundingClientRect();
                     return { id: Number(event.dataset.id), position: mode === 1 ? rect.top : rect.left, size: size(event),
                         textTop: info?.top, textBottom: info?.bottom,
+                        titleUnclipped: event.querySelector(mode === 1 ? '.epg__title' : '.ename').scrollWidth <= title.width + 1,
                         titleFits: title.top >= rect.top && title.bottom <= rect.bottom + 0.1 };
                 }), secondCount: Array.from(mode === 1 ? document.querySelectorAll('#tbl1body tr td:nth-child(2) [data-id]') :
                     document.querySelectorAll('.eventlist')[1].querySelectorAll('[data-id]')).filter(event => Number(event.dataset.id) >= 1100).length,
                 empty: Array.from(document.querySelectorAll('.epg__slot')).filter(slot => !slot.querySelector('.event')).length };
         }, mode);
-        assert.equal(geometry.clipped, mode === 1 ? 40 : 100);
+        assert.equal(geometry.clipped, mode === 1 ? 40 : Math.max(100, Math.ceil(geometry.clippedTitleWidth) + 1));
         assert.equal(geometry.last, mode === 1 ? 60 : 600);
         assert.equal(geometry.spanning, mode === 1 ? 1200 : 3000);
         assert.equal(geometry.events.length, 80);
@@ -802,8 +852,12 @@ for (const mode of [1, 2]) {
         for (const event of geometry.events) {
             assert.ok(event.titleFits, 'Every short title must be visible');
             if (mode === 2) {
-                assert.ok(Math.abs(event.position - first.position - (event.id - first.id) * 50) < 0.1);
-                assert.equal(event.size, 30, 'Wrapping must not enlarge horizontal time blocks');
+                assert.ok(event.position - first.position >= (event.id - first.id) * 50 - 0.1);
+                assert.ok(event.size >= 30, 'Das gemeinsame Zeitraster schafft horizontal Platz für kurze Titel');
+                assert.ok(event.titleUnclipped, 'Kurze Titel werden vollständig und nicht vertikal umgebrochen angezeigt');
+                const previous = geometry.events[geometry.events.indexOf(event) - 1];
+                if (previous) assert.ok(event.position >= previous.position + previous.size + 20 - 0.1,
+                    'Sendungen und die zweiminütigen Programmlücken dürfen nicht überlappen');
             } else {
                 assert.ok(event.position - first.position >= (event.id - first.id) * 20 - 0.1);
                 assert.ok(event.size >= 20, 'The shared grid makes room for short titles');

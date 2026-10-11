@@ -55,7 +55,7 @@ function jumpOnTimeline(day, now = 37800, first = 0, targetTime = {201: 6, 202: 
 	const FixedDate = class extends Date {
 		static now() { return now * 1000; }
 	};
-	runScript(functionSource('clampTimelineScroll') + '\n(' + code + ').call({});', {
+	runScript(['timelinePosition', 'clampTimelineScroll'].map(functionSource).join('\n') + '\n(' + code + ').call({});', {
 		jQuery, Date: FixedDate, config: {mode: 2, day: 0, week: 0, first, slotStart: first}, tableNode: {scrollWidth, clientWidth}
 	});
 	return scroller.position;

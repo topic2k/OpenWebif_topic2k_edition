@@ -9,6 +9,7 @@ function layout(viewport, cardTop, tableTop, mode = 'Zeitschrift') {
 	};
 	const table = {
 		getBoundingClientRect: () => ({top: state.tableTop}),
+		style: {setProperty() {}},
 		querySelectorAll: () => [],
 		classList: {contains: name => name === 'epg__tv-guide' && mode === 'Zeitschrift'},
 		querySelector: selector => {
@@ -31,7 +32,7 @@ function layout(viewport, cardTop, tableTop, mode = 'Zeitschrift') {
 		};
 		throw new Error('Unerwarteter Selektor: ' + selector);
 	};
-	const source = ['resizeModernEpgCard', 'fixTableHeight', 'layoutTvGuideLabels', 'layoutTimelineLabels', 'updateHourLines', 'updateCurrentEvents', 'hideEpgTooltip'].map(functionSource).join('\n');
+	const source = ['resizeModernEpgCard', 'fixTableHeight', 'layoutTvGuideLabels', 'buildEpgTimelineGrid', 'timelinePosition', 'layoutTimelineLabels', 'updateHourLines', 'updateCurrentEvents', 'hideEpgTooltip', 'updateTimelineNowMarker'].map(functionSource).join('\n');
 	const context = runScript(source, {jQuery, tableNode: table, tooltip: {}, tooltipTimeout: null, clearTimeout,
 		scope: {find: () => ({removeAttr() {}})}, config: {mode: mode === 'Zeitschrift' ? 1 : 2},
 		window: {get innerHeight() { return state.viewport; }}});

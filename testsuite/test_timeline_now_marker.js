@@ -71,7 +71,7 @@ function startClock(mode = 2, day = 0, week = 0) {
 			disconnect() { observers.delete(this); }
 		}
 	};
-	const script = ['startEpgNowMarker', 'epgTimelineNowPosition', 'guidePosition', 'updateCurrentEvents', 'updateTvGuideNowMarker'].map(functionSource).join('\n') + '\n' +
+	const script = ['startEpgNowMarker', 'timelinePosition', 'epgTimelineNowPosition', 'guidePosition', 'updateCurrentEvents', 'updateTvGuideNowMarker', 'updateTimelineNowMarker'].map(functionSource).join('\n') + '\n' +
 		sourceSection('if (config.day === 0 && config.week === 0)', 'var list = document.getElementById');
 	runScript(script, context);
 	return {

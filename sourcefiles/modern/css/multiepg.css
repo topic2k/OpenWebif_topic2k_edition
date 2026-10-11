@@ -115,7 +115,7 @@
 .modern-epg--timeline .event a:link:hover { text-decoration: none; }
 .modern-epg--timeline .ename { display: block; width: 100%; box-sizing: border-box; padding: 2px 5px; float: left; font-weight: 200; font-size: 14px; line-height: 1.25; }
 .modern-epg--timeline .etime, .modern-epg--timeline .etimer { display: inline-block; padding-left: 5px; font-weight: 200; font-size: 12px; }
-.modern-epg--timeline .event .ename { white-space: normal; overflow-wrap: anywhere; }
+.modern-epg--timeline .event .ename { white-space: nowrap; width: max-content; }
 .modern-epg--timeline .event .etime, .modern-epg--timeline .event .etimer { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .modern-epg--timeline .event .ename, .modern-epg--timeline .event .etime, .modern-epg--timeline .event .etimer { position: relative; z-index: 6; }
 .modern-epg--timeline .epg__timeline-info { display: block; position: relative; z-index: 6; width: max-content; max-width: 100%; }

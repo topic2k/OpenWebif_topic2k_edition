@@ -61,7 +61,7 @@ function runTimeline(marker, eventStart, enabled = true, scrollWidth = 30140) {
 		if (selector === '.epg__channel-col') return {first: () => ({outerWidth: () => 140})};
 		throw new Error('Unexpected selector: ' + selector);
 	};
-	const context = runScript(jumpConfig + functionSource('epgTimelineNowPosition') + '\n' +
+	const context = runScript(jumpConfig + functionSource('timelinePosition') + '\n' + functionSource('epgTimelineNowPosition') + '\n' +
 		functionSource('clampTimelineScroll') + '\n' + functionSource('autoJumpTimeline'), {
 		jQuery: $, Date: {now: () => 4560000},
 		tableNode: {scrollWidth, clientWidth: 600},
