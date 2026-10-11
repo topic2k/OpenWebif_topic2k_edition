@@ -7,7 +7,7 @@ const {functionSource, runScript} = require('./test_epg_source');
 const template = readFileSync(path.join(__dirname, '../plugin/controllers/views/responsive/ajax/multiepg.tmpl'), 'utf8').replace(/\r\n/g, '\n');
 
 function renderMarker(now, slotStart, rowHeights, hasChannels = true) {
-	const functionBody = functionSource('updateTvGuideNowMarker');
+	const functionBody = ['guidePosition', 'updateCurrentEvents', 'updateTvGuideNowMarker'].map(functionSource).join('\n');
 	const marker = { length: 1, styles: {}, visible: false,
 		css(styles) { Object.assign(this.styles, styles); return this; },
 		show() { this.visible = true; return this; },
@@ -28,7 +28,7 @@ function renderMarker(now, slotStart, rowHeights, hasChannels = true) {
 	};
 	const context = {
 		jQuery: selector => selections[selector], scope: {find: selector => selections[selector]},
-		Date: { now: () => now * 1000 }, config: {slotStart}, marker
+		Date: { now: () => now * 1000 }, config: {slotStart}, marker, tableNode: {querySelectorAll: () => []}
 	};
 	runScript(functionBody + '\nupdateTvGuideNowMarker();', context);
 	return marker;
@@ -59,9 +59,9 @@ test('guide layout fixes event positions and clips across slots and day edges', 
 		style: {}, getAttribute: name => name === 'data-begin' ? begin : end
 	}));
 	const surfaces = events.map((event, index) => ({
-		getAttribute: () => [0, 0, 11, 11][index], querySelectorAll: () => [event]
+		style: {}, getAttribute: () => [0, 0, 11, 11][index], querySelectorAll: () => [event]
 	}));
-	runScript(functionSource('layoutTvGuide') + '\nlayoutTvGuide();', {
+	runScript(functionSource('guidePosition') + '\n' + functionSource('layoutTvGuide') + '\nlayoutTvGuide();', {
 		tableNode: {classList: {contains: () => true}, querySelectorAll: () => surfaces}
 	});
 	assert.equal(events[0].style.top, '0px');

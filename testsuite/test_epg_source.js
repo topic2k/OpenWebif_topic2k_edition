@@ -47,7 +47,7 @@ function sourceSection(beginning, ending) {
 }
 
 function runScript(script, values = {}) {
-	const context = vm.createContext({config: {mode: 1, day: 0, week: 0, first: 0, slotStart: 0}, ...values});
+	const context = vm.createContext({config: {mode: 1, day: 0, week: 0, first: 0, slotStart: 0}, guideGrid: null, ...values});
 	vm.runInContext(fs.readFileSync(path.join(root, 'sourcefiles', 'modern', 'js', 'epgtime.js'), 'utf8'), context);
 	if (context.window) {
 		context.EpgTime = context.window.EpgTime;

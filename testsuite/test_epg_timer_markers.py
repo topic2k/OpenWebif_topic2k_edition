@@ -220,7 +220,8 @@ class EpgTimerMarkerTests(unittest.TestCase):
                     'getMultiEpg': lambda *args, **kwargs: {'modern': kwargs['modern']},
                     'config': SimpleNamespace(OpenWebif=SimpleNamespace(webcache=SimpleNamespace(
                         mepgmode=SimpleNamespace(value=0), epg_jump_now=SimpleNamespace(value=0),
-                        epg_jump_active_service=SimpleNamespace(value=0)))),
+                        epg_jump_active_service=SimpleNamespace(value=0), epg_hourly_lines=SimpleNamespace(value=True),
+                        epg_channel_lines=SimpleNamespace(value=True)))),
                     'NavigationInstance': SimpleNamespace(instance=None),
                 }
                 exec(compile(ast.Module(body=[handler], type_ignores=[]), str(AJAX), 'exec'), namespace)
@@ -247,7 +248,7 @@ class EpgTimerMarkerTests(unittest.TestCase):
                 self.assertEqual(details['markerType'], expected)
                 self.assertIn('event--has-timer timer--' + expected, self.renderer.render(self.event(details)))
                 self.assertIn("$event['timer']['markerType']", self.template)
-                self.assertIn('class="event$timerClass"', self.template)
+                self.assertIn('class="event$timerClass$iscurr"', self.template)
 
     def test_zap_timer_without_always_zap(self):
         timer = SimpleNamespace(disabled=0, justplay=1)

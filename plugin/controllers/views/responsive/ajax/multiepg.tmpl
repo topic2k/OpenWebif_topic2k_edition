@@ -14,6 +14,8 @@
 #end if
 #set $now = $epgClock.time()
 #set $epgConfig = {'mode': $mode, 'day': $day, 'week': $week, 'epgmode': $epgmode, 'bref': $quote($bref), 'slotStart': $slot_start, 'first': $first, 'dateLabels': $getEpgDateLabels($tstrings), 'jumpNow': $epg_jump_now, 'jumpActiveService': $epg_jump_active_service, 'currentServiceRef': $current_service_ref}
+#set $epgConfig['hourlyLines'] = $getVar('epg_hourly_lines', True)
+#set $epgConfig['channelLines'] = $getVar('epg_channel_lines', True)
 #if $mode == 2
 	#set $epgConfig['timelineEnd'] = $timeline_end
 #end if
@@ -76,7 +78,7 @@
 #if $day == 0 and $week == 0
 	<div class="epg__tv-guide-now"></div>
 #end if
-	<table border="0" cellpadding="0" cellspacing="0" width="100%" id="tbl1" class="table table-striped">
+	<table border="0" cellpadding="0" cellspacing="0" width="100%" id="tbl1" class="table">
 		<thead>
 			<tr id="tbl2body">
 #for $sname, $eventlist in $events.items()
@@ -143,16 +145,17 @@
 	#if $event['timer']
 		#set $timerClass = ' event--has-timer timer--' + $event['timer']['markerType']
 	#end if
-					<li class="event$timerClass" data-ref="$ref" data-id="${event.id}" data-begin="${event.begin_timestamp}" data-end="$end" data-toggle="modal" data-target="#EventModal" onclick="if (event.target.closest('.epg__timer-marker')) return; loadeventepg('${event.id}', '$ref');return false;" style="left:${eventLeft}px;width:${eventWidth}px;">
-						<a href="javascript:void(0);" class="ui-widget-content ${iscurr}" title="$escape($event['title'], quote=True)">
+					<li class="event$timerClass$iscurr" tabindex="0" data-ref="$ref" data-id="${event.id}" data-begin="${event.begin_timestamp}" data-end="$end" data-toggle="modal" data-target="#EventModal" onclick="if (event.target.closest('.epg__timer-marker')) return; loadeventepg('${event.id}', '$ref');return false;" style="left:${eventLeft}px;width:${eventWidth}px;">
+						<a href="javascript:void(0);" class="ui-widget-content">
 							<span class="epg__timeline-info">
-								<span class="ename">$escape($event['title'], quote=False)<span class="etimesmall"> ($strftime("%d.%m", $localtime($event['begin_timestamp'])))</span></span>
+								<span class="ename" data-epg-title="$escape($event['title'], quote=True)">$escape($event['title'], quote=False)<span class="etimesmall"> ($strftime("%d.%m", $localtime($event['begin_timestamp'])))</span></span>
 								<span class="etime">$strftime("%H:%M", $localtime($event['begin_timestamp'])) - $strftime("%H:%M", $localtime($event['begin_timestamp'] + $event['duration']))</span>
 #if $event['timerStatus'] != ''
 								<span class="etimer $event['timerStatus']">$tstrings['timer']</span>
 #end if
 							</span>
 						</a>
+						<span class="epg__tooltip-details" hidden>$event['shortdesc']</span>
 #if $event['timer']
 	#set $timerMetadata = $escape($dumps({'sref': $quote($event['timer']['sref']), 'begin': $event['timer']['begin'], 'end': $event['timer']['end']}, separators=(',', ':')), quote=True)
 						<button type="button" class="epg__timer-marker" data-metadata="$timerMetadata" data-toggle="modal" data-target="#TimerModal" onclick="event.stopPropagation(); jQuery('#TimerModal').modal('show', this); return false;" title="$tstrings['edit_timer']" aria-label="$tstrings['edit_timer']"></button>

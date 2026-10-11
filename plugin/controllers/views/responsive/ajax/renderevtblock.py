@@ -10,7 +10,7 @@ from urllib.parse import quote
 class renderEvtBlock:
 	def __init__(self):
 		self.template = """
-		<article onclick="if (event.target.closest('.epg__timer-marker')) return; loadeventepg('%s', '%s'); return false;" class="epg__event event %s" data-ref="%s" data-id="%s" data-begin="%s" data-end="%s" data-toggle="modal" data-target="#EventModal">
+		<article onclick="if (event.target.closest('.epg__timer-marker')) return; loadeventepg('%s', '%s'); return false;" class="epg__event event %s" tabindex="0" data-ref="%s" data-id="%s" data-begin="%s" data-end="%s" data-toggle="modal" data-target="#EventModal">
 			<div class="epg__event-info">
 			<time class="epg__time--start">%s</time>
 			<span class="epg__title title">

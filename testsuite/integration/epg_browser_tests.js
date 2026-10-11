@@ -27,6 +27,7 @@ async function openEpg(t, mode = 1, variant = '') {
     const unexpected = [];
     const loads = [];
     const assetLoads = [];
+    const gridPreferences = {epg_hourly_lines: true, epg_channel_lines: true};
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
         const url = new URL(route.request().url());
@@ -43,13 +44,18 @@ async function openEpg(t, mode = 1, variant = '') {
                     // Only the surrounding application shell is substituted; EPG scripts and jQuery.load run unchanged.
                     jQuery.fx.off = true;
                     jQuery.AdminBSB = { input: { activate: function() {} } };
+                    function autosize() {}
+                    var timeredit_initialized = true;
                     var loadspinner = '<div id="spinner">Laden</div>', mepgdirect = 0;
                     function load_tvcontent_spin(url) { jQuery('#tvcontent').html(loadspinner).load(url); }
                     function SetLSValue(key, value) { localStorage.setItem(key, value); }
                     window.eventCalls = []; window.modalCalls = [];
-                    function loadeventepg(id, ref) { window.eventCalls.push({ id, ref }); }
                     jQuery.fn.modal = function(action, node) { window.modalCalls.push(node.dataset.metadata); return this; };
-                </script>${fixtures.assetTags}</head><body><div id="header"></div>${fixtures.shell}</body></html>` });
+                </script>${fixtures.assetTags}<script>
+                    getStatusInfo = function() {};
+                    loadeventepg = function(id, ref) { window.eventCalls.push({ id, ref }); };
+                </script></head><body><div id="header"></div>
+                <ul hidden id="grid-settings">${fixtures.gridSettings}</ul>${fixtures.shell}</body></html>` });
         }
         if (Object.hasOwn(fixtures.assets, url.pathname)) {
             assetLoads.push(url.pathname);
@@ -61,13 +67,21 @@ async function openEpg(t, mode = 1, variant = '') {
             const week = Number(url.searchParams.get('week') || 0);
             const bouquet = url.searchParams.get('bref');
             if (bouquet) assert.ok([fixtures.bouquet, fixtures.otherBouquet].includes(bouquet));
-            const key = `${mode}:${day}:${week}${variant ? ':' + variant : ''}${bouquet === fixtures.otherBouquet ? ':other' : ''}`;
+            const gridOff = !gridPreferences.epg_hourly_lines && !gridPreferences.epg_channel_lines;
+            const pageVariant = gridOff ? (variant ? variant + '-grid-off' : 'grid-off') : variant;
+            const key = `${mode}:${day}:${week}${pageVariant ? ':' + pageVariant : ''}${bouquet === fixtures.otherBouquet ? ':other' : ''}`;
             const markup = fixtures.pages[key];
             assert.ok(markup, 'Missing rendered fixture for ' + key);
             loads.push({ mode, day, week });
             return route.fulfill({ contentType: 'text/html', body: markup });
         }
         if (url.pathname === '/api/setwebconfig') {
+            for (const key of Object.keys(gridPreferences)) {
+                if (url.searchParams.has(key)) {
+                    gridPreferences[key] = url.searchParams.get(key) === '1';
+                    return route.fulfill({ json: { result: true } });
+                }
+            }
             mode = Number(url.searchParams.get('mepgmode'));
             assert.ok(mode === 1 || mode === 2);
             return route.fulfill({ json: { result: true } });
@@ -100,6 +114,8 @@ async function openEpg(t, mode = 1, variant = '') {
         assert.deepEqual(assetLoads.sort(), Object.keys(fixtures.assets).sort(), 'EPG assets load once, not on every AJAX refresh');
     });
     await page.goto(origin);
+    await page.clock.runFor(200);
+    assert.deepEqual(errors, [], 'Browser startup errors');
     await page.waitForSelector('#fulltbl');
     await waitForDom(page, () => parseFloat(document.getElementById('fulltbl')?.style.height) > 0);
     await page.clock.runFor(200);
@@ -262,6 +278,260 @@ test('Zeitstrahl: Enddatum und Jetzt-Markierung erzeugen keinen zusätzlichen Sc
 });
 
 for (const mode of [1, 2]) {
+    test(`${mode === 1 ? 'Zeitschrift' : 'Zeitstrahl'}: Rastereinstellungen wirken sofort und bleiben beim Nachladen erhalten`, async t => {
+        const {page} = await openEpg(t, mode, 'alignment');
+        for (const key of ['epg_hourly_lines', 'epg_channel_lines']) {
+            assert.equal(await page.locator('#' + key).isChecked(), true);
+        }
+        const separator = () => page.evaluate(mode => {
+            const element = document.querySelector(mode === 1 ? '#tbl1body td.border + td.border' : '.epg__timeline-row + .epg__timeline-row');
+            const style = getComputedStyle(element);
+            return mode === 1 ? style.borderLeftColor : style.borderTopColor;
+        }, mode);
+        for (const theme of ['theme--supabright', 'theme--city-lights', 'theme--neon-blackout']) {
+            await page.evaluate(theme => { document.body.className = theme; }, theme);
+            assert.equal(await separator(), 'rgba(127, 127, 127, 0.2)');
+        }
+        if (mode === 1) assert.equal(await page.locator('.epg__hour-line').count(), 48);
+        for (const key of ['epg_hourly_lines', 'epg_channel_lines']) {
+            await page.locator('#' + key).evaluate(input => { input.checked = false; jQuery(input).trigger('change'); });
+            await waitForDom(page, key => !jQuery('#modern-epg').hasClass('epg--channel-lines') && key === 'epg_channel_lines' ||
+                key === 'epg_hourly_lines' && (document.querySelector('.epg__timeline') || document.querySelectorAll('.epg__hour-line').length === 24), key);
+        }
+        assert.notEqual(await separator(), 'rgba(127, 127, 127, 0.2)');
+        if (mode === 1) assert.equal(await page.locator('.epg__hour-line').count(), 24);
+        await page.evaluate(() => {
+            window.previousEpgTable = document.getElementById('fulltbl');
+            jQuery('#tvcontent').html(loadspinner).load(window.previousEpgTable.dataset.refreshUrl);
+        });
+        await waitForDom(page, () => document.getElementById('fulltbl') !== window.previousEpgTable &&
+            document.getElementById('fulltbl') && !document.getElementById('modern-epg').classList.contains('epg--channel-lines'));
+        await page.clock.runFor(200);
+        assert.notEqual(await separator(), 'rgba(127, 127, 127, 0.2)');
+        if (mode === 1) assert.equal(await page.locator('.epg__hour-line').count(), 24);
+        for (const key of ['epg_hourly_lines', 'epg_channel_lines']) {
+            await page.locator('#' + key).evaluate(input => { input.checked = true; jQuery(input).trigger('change'); });
+        }
+        await waitForDom(page, () => document.getElementById('modern-epg').classList.contains('epg--channel-lines'));
+        if (mode === 1) assert.equal(await page.locator('.epg__hour-line').count(), 48);
+        assert.equal(await separator(), 'rgba(127, 127, 127, 0.2)');
+    });
+
+    test(`${mode === 1 ? 'Zeitschrift' : 'Zeitstrahl'}: laufende Sendungen bleiben beim Hover grau`, async t => {
+        const { page } = await openEpg(t, mode, 'alignment');
+        await page.clock.setSystemTime((fixtures.midnight + 12 * 3600 + 60) * 1000);
+        await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+        for (const theme of ['theme--supabright', 'theme--city-lights']) {
+            await page.evaluate(theme => { document.body.className = theme; }, theme);
+            await page.mouse.move(0, 0);
+            const current = page.locator('[data-id="4001"]').first();
+            await current.scrollIntoViewIfNeeded();
+            const appearance = () => current.evaluate(event => ({
+                background: getComputedStyle(event).backgroundColor,
+                filter: getComputedStyle(event).filter,
+                linkBackground: event.querySelector('a') ? getComputedStyle(event.querySelector('a')).backgroundColor : null
+            }));
+            const before = await appearance();
+            assert.equal(before.background, 'rgb(233, 233, 233)');
+            await current.locator(mode === 1 ? '.epg__title' : '.ename').hover();
+            const hovered = await appearance();
+            assert.equal(hovered.filter, 'none', 'Hover must not brighten the grey background to white');
+            assert.deepEqual(hovered, before);
+        }
+    });
+
+    test(`${mode === 1 ? 'Zeitschrift' : 'Zeitstrahl'}: Jetzt lässt ein Drittel des Zeitbereichs davor sichtbar`, async t => {
+        const { page } = await openEpg(t, mode, 'alignment');
+        await page.clock.setSystemTime((fixtures.midnight + 12 * 3600 + 60) * 1000);
+        for (const viewport of [{width: 1280, height: 900}, {width: 800, height: 650}]) {
+            await page.setViewportSize(viewport);
+            await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+            await page.clock.runFor(200);
+            for (const scroll of [0, 1000]) {
+                await page.locator('#fulltbl').evaluate((table, {mode, scroll}) => {
+                    if (mode === 1) table.scrollTop = scroll;
+                    else table.scrollLeft = scroll;
+                }, {mode, scroll});
+                await page.locator('#pt4').click({ force: true });
+                const position = await page.locator('#fulltbl').evaluate((table, mode) => {
+                    const bounds = table.getBoundingClientRect();
+                    const marker = table.querySelector(mode === 1 ? '.epg__tv-guide-now' : '.timetable-now').getBoundingClientRect();
+                    const header = table.querySelector(mode === 1 ? '.serviceheader' : '.epg__channel-col').getBoundingClientRect();
+                    return mode === 1 ? (marker.top - bounds.top - header.height) / (table.clientHeight - header.height) :
+                        (marker.left - bounds.left - header.width) / (table.clientWidth - header.width);
+                }, mode);
+                assert.ok(Math.abs(position - 1 / 3) < 0.005, String(position));
+            }
+        }
+    });
+
+    test(`${mode === 1 ? 'Zeitschrift' : 'Zeitstrahl'}: vollständige Titel, verzögerte Details und laufende Sendungen`, async t => {
+        const { page } = await openEpg(t, mode, 'alignment');
+        await page.clock.setSystemTime((fixtures.midnight + 12 * 3600 + 60) * 1000);
+        await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+        const titleSelector = mode === 1 ? '.epg__title' : '.ename';
+        async function checkTitles() {
+            for (const width of [800, 1280]) {
+                await page.setViewportSize({ width, height: 900 });
+                await page.clock.runFor(200);
+                await page.locator('[data-id="4001"]').first().scrollIntoViewIfNeeded();
+                await page.clock.runFor(200);
+                await page.clock.setSystemTime((fixtures.midnight + 12 * 3600 + 60) * 1000);
+                await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+                const geometry = await page.locator('[data-id="4001"]').evaluateAll((events, {mode, titleSelector}) => events.map(event => {
+                    const rect = event.getBoundingClientRect();
+                    const title = event.querySelector(titleSelector).getBoundingClientRect();
+                    const marker = document.querySelector(mode === 1 ? '.epg__tv-guide-now' : '.timetable-now').getBoundingClientRect();
+                    return { top: rect.top, titleTop: title.top, complete: title.top >= rect.top && title.bottom <= rect.bottom + 0.1,
+                        unclipped: event.querySelector(titleSelector).scrollHeight <= title.height + 1 &&
+                            event.querySelector(titleSelector).scrollWidth <= title.width + 1,
+                        ratio: mode === 1 ? (marker.top - rect.top) / rect.height : (marker.left - rect.left) / rect.width,
+                        hidden: event.classList.contains('epg__details-hidden'), background: getComputedStyle(event).backgroundColor };
+                }), {mode, titleSelector});
+                assert.ok(geometry.every(event => event.complete && event.unclipped), JSON.stringify(geometry));
+                if (mode === 1) {
+                    assert.equal(geometry[0].titleTop, geometry[1].titleTop, '12:00 titles align across channels');
+                    assert.equal(geometry[0].top, geometry[1].top);
+                }
+                assert.ok(geometry.every(event => Math.abs(event.ratio - 1 / 3) < 0.002), JSON.stringify(geometry));
+                assert.ok(geometry.every(event => event.background === 'rgb(233, 233, 233)'), JSON.stringify(geometry));
+            }
+        }
+        await checkTitles();
+        const short = page.locator('[data-id="4001"]').last();
+        assert.ok(await short.evaluate(event => event.classList.contains('epg__details-hidden')));
+        await short.locator(titleSelector).hover();
+        await page.clock.runFor(1499);
+        assert.equal(await page.locator('.epg__tooltip').isVisible(), false);
+        await page.clock.runFor(1);
+        assert.equal(await page.locator('.epg__tooltip').isVisible(), true);
+        assert.ok((await page.locator('.epg__tooltip').textContent()).includes('Verborgene Details mit Information & mehr'));
+        await page.mouse.move(0, 0);
+        assert.equal(await page.locator('.epg__tooltip').isVisible(), false);
+        await short.locator(titleSelector).hover();
+        await page.clock.runFor(1000);
+        await page.mouse.move(0, 0);
+        await page.clock.runFor(1000);
+        assert.equal(await page.locator('.epg__tooltip').isVisible(), false, 'Leaving early cancels the pending tooltip');
+        await short.focus();
+        await page.clock.runFor(1500);
+        assert.equal(await page.locator('.epg__tooltip').isVisible(), true, 'Hidden details are also available on keyboard focus');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('.epg__tooltip').isVisible(), false);
+        await short.evaluate(event => event.blur());
+        await short.locator(titleSelector).hover();
+        await page.clock.runFor(1000);
+        await page.evaluate(() => {
+            const url = document.getElementById('fulltbl').dataset.refreshUrl;
+            jQuery('#tvcontent').html(loadspinner).load(url);
+        });
+        await page.waitForSelector('[data-id="4001"]');
+        await page.mouse.move(0, 0);
+        await page.clock.runFor(2000);
+        assert.equal(await page.locator('.epg__tooltip').count(), 1, 'Reload disposes the previous tooltip');
+        assert.equal(await page.locator('.epg__tooltip').isVisible(), false, 'Reload cancels pending tooltip work');
+        assert.equal(await intervalCount(page), 1);
+        await page.evaluate(() => document.body.classList.add('theme--city-lights'));
+        await checkTitles();
+        await page.clock.setSystemTime((fixtures.midnight + 12 * 3600 + 3 * 60) * 1000);
+        await page.clock.runFor(10000);
+        assert.ok(await short.evaluate(event => !event.classList.contains('curevent')));
+        assert.ok(await page.locator('[data-id="4002"]').first().evaluate(event => event.classList.contains('curevent')));
+        if (mode === 1) assert.equal(await page.locator('#tbl1').evaluate(table => table.classList.contains('table-striped')), false);
+    });
+}
+
+test('Zeitschrift: 19:56 und 19:57 zeigen Titel an ihrer Startzeit und verbergen nicht passende Details', async t => {
+    const { page } = await openEpg(t, 1, 'boundary');
+    async function checkLabels() {
+        const labels = [];
+        for (const event of await page.locator('[data-id="3001"]').all()) {
+            await event.locator('.epg__title').scrollIntoViewIfNeeded();
+            await page.clock.runFor(200);
+            labels.push(await event.evaluate(event => {
+                const info = event.querySelector('.epg__event-info');
+                const rect = event.getBoundingClientRect(), text = info.getBoundingClientRect();
+                const next = event.closest('td').parentElement.nextElementSibling
+                    .children[event.closest('td').cellIndex].querySelector('[data-id="3002"]');
+                const previous = event.previousElementSibling.querySelector('.epg__event-info').getBoundingClientRect();
+                const title = info.querySelector('.epg__title').getBoundingClientRect();
+                const at = document.elementFromPoint(title.left + title.width / 2, title.top + title.height / 2);
+                return { height: rect.height, start: event.style.top, visibleHeight: text.height,
+                    requiredHeight: info.scrollHeight, beforeNext: text.bottom <= next.getBoundingClientRect().top + 0.1,
+                    afterPrevious: text.top >= previous.bottom, titleVisible: title.top >= text.top && title.bottom <= text.bottom + 0.1,
+                    descriptionHidden: getComputedStyle(info.querySelector('.epg__desc')).display === 'none',
+                    aligned: Math.abs(text.top - rect.top) < 0.1,
+                    clickable: at?.closest('.epg__event') === event,
+                    title: {left: title.left, top: title.top, right: title.right, bottom: title.bottom}, hit: at?.outerHTML.slice(0, 150) };
+            }));
+        }
+        assert.equal(labels.length, 2);
+        for (const label of labels) {
+            assert.ok(label.height >= 20, 'The common time grid reserves room for every title');
+            assert.ok(label.aligned, 'Titles stay at their real start, never lifted above it');
+            assert.ok(label.visibleHeight >= label.requiredHeight, JSON.stringify(label));
+            assert.ok(label.titleVisible && label.descriptionHidden, 'Titles stay visible and insufficient detail space uses a tooltip: ' + JSON.stringify(label));
+            assert.ok(label.beforeNext && label.afterPrevious, 'Labels must not overlap neighbouring programmes');
+            assert.ok(label.clickable, 'The title still opens its own programme: ' + JSON.stringify(label));
+        }
+    }
+    await checkLabels();
+    await page.locator('[data-id="3001"] .epg__title').first().click();
+    assert.equal(await page.evaluate(() => window.eventCalls.at(-1).id), '3001');
+    await page.locator('[data-id="3001"] .epg__timer-marker').first().click();
+    assert.equal(await page.evaluate(() => window.modalCalls.length), 1);
+    assert.equal(await page.evaluate(() => window.eventCalls.length), 1);
+    for (const scrollTop of [250, 420, 0]) {
+        await page.locator('#fulltbl').evaluate((table, scrollTop) => {
+            table.scrollTop = scrollTop;
+            table.dispatchEvent(new Event('scroll'));
+        }, scrollTop);
+        await page.clock.runFor(200);
+        await checkLabels();
+    }
+    for (const width of [800, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.clock.runFor(200);
+        await checkLabels();
+    }
+    await page.evaluate(() => document.body.classList.add('theme--city-lights'));
+    await checkLabels();
+    await page.evaluate(() => {
+        const url = document.getElementById('fulltbl').dataset.refreshUrl;
+        jQuery('#tvcontent').html(loadspinner).load(url);
+    });
+    await page.waitForSelector('[data-id="3001"]');
+    await page.clock.runFor(200);
+    await checkLabels();
+});
+
+test('Zeitschrift: volle Stunden bleiben bei kurzen Sendungen und Größenwechseln mit der Jetzt-Linie ausgerichtet', async t => {
+    const {page} = await openEpg(t, 1, 'alignment');
+    for (const viewport of [{width: 1280, height: 900}, {width: 800, height: 650}]) {
+        await page.setViewportSize(viewport);
+        for (const hour of [12, 13, 23]) {
+            await page.clock.setSystemTime((fixtures.midnight + hour * 3600) * 1000);
+            await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+            await page.clock.runFor(200);
+            const positions = await page.evaluate(time => {
+                const lines = Array.from(document.querySelectorAll(`.epg__hour-line[data-time="${time}"]`));
+                const marker = document.querySelector('.epg__tv-guide-now');
+                return {marker: marker.getBoundingClientRect().top,
+                    lines: lines.map(line => ({top: line.getBoundingClientRect().top,
+                        height: line.getBoundingClientRect().height, pointerEvents: getComputedStyle(line).pointerEvents}))};
+            }, fixtures.midnight + hour * 3600);
+            assert.equal(positions.lines.length, 2);
+            for (const line of positions.lines) {
+                assert.ok(Math.abs(line.top - positions.marker) < 1, JSON.stringify(positions));
+                assert.equal(line.height, 1);
+                assert.equal(line.pointerEvents, 'none');
+            }
+        }
+        assert.equal(await page.locator('.epg__hour-line').count(), 48, 'Keine doppelten Linien nach Größenwechsel');
+    }
+});
+
+for (const mode of [1, 2]) {
     const view = mode === 1 ? 'Zeitschrift' : 'Zeitstrahl';
     test(`${view}: 20:47 liegt bei 32/90 der Sendung 20:15–21:45, unabhängig vom Text`, async t => {
         const { page } = await openEpg(t, mode, 'geometry');
@@ -349,7 +619,7 @@ for (const mode of [1, 2]) {
         assert.equal(await intervalCount(page), 1);
     });
 
-    test(`${view}: Lücken, kurze Sendungen sowie Slot- und Tagesgrenzen behalten ihren Maßstab`, async t => {
+    test(`${view}: Lücken, kurze Sendungen sowie Slot- und Tagesgrenzen behalten ihre Zeitzuordnung`, async t => {
         const { page } = await openEpg(t, mode, 'geometry');
         const geometry = await page.evaluate(mode => {
             const size = event => { const rect = event.getBoundingClientRect(); return mode === 1 ? rect.height : rect.width; };
@@ -360,7 +630,11 @@ for (const mode of [1, 2]) {
                 spanning: size(document.querySelector('[data-id="1003"]')),
                 events: firstChannel.map(event => {
                     const rect = event.getBoundingClientRect();
-                    return { id: Number(event.dataset.id), position: mode === 1 ? rect.top : rect.left, size: size(event) };
+                    const info = mode === 1 ? event.querySelector('.epg__event-info').getBoundingClientRect() : null;
+                    const title = event.querySelector(mode === 1 ? '.epg__title' : '.ename').getBoundingClientRect();
+                    return { id: Number(event.dataset.id), position: mode === 1 ? rect.top : rect.left, size: size(event),
+                        textTop: info?.top, textBottom: info?.bottom,
+                        titleFits: title.top >= rect.top && title.bottom <= rect.bottom + 0.1 };
                 }), secondCount: Array.from(mode === 1 ? document.querySelectorAll('#tbl1body tr td:nth-child(2) [data-id]') :
                     document.querySelectorAll('.eventlist')[1].querySelectorAll('[data-id]')).filter(event => Number(event.dataset.id) >= 1100).length,
                 empty: Array.from(document.querySelectorAll('.epg__slot')).filter(slot => !slot.querySelector('.event')).length };
@@ -372,8 +646,21 @@ for (const mode of [1, 2]) {
         assert.equal(geometry.secondCount, 40, 'Different event counts must not change the scale');
         const first = geometry.events[0];
         for (const event of geometry.events) {
-            assert.ok(Math.abs(event.position - first.position - (event.id - first.id) * (mode === 1 ? 20 : 50)) < 0.1);
-            assert.equal(event.size, mode === 1 ? 12 : 30, 'Text must not enlarge short time blocks');
+            assert.ok(event.titleFits, 'Every short title must be visible');
+            if (mode === 2) {
+                assert.ok(Math.abs(event.position - first.position - (event.id - first.id) * 50) < 0.1);
+                assert.equal(event.size, 30, 'Wrapping must not enlarge horizontal time blocks');
+            } else {
+                assert.ok(event.position - first.position >= (event.id - first.id) * 20 - 0.1);
+                assert.ok(event.size >= 20, 'The shared grid makes room for short titles');
+                assert.equal(event.textTop, event.position, 'A title must stay at its time boundary');
+            }
+        }
+        if (mode === 1) {
+            for (let index = 1; index < geometry.events.length; index++) {
+                assert.ok(geometry.events[index].textTop >= geometry.events[index - 1].textBottom,
+                    'Dense short programmes must not overlap their neighbours');
+            }
         }
         if (mode === 1) assert.ok(geometry.empty > 0, 'Empty slots remain empty time surfaces');
     });
@@ -419,15 +706,19 @@ for (const mode of [1, 2]) {
         assert.equal(await markerPosition(page, mode), stale, 'No interval has fired after the clock change');
         await page.locator('[data-day="200"]').click({ force: true });
         const position = await page.locator('#fulltbl').evaluate((table, mode) => {
-            if (mode === 2) return { actual: table.scrollLeft,
-                expected: Math.min(table.scrollWidth - table.clientWidth,
-                    Math.max(0, (Date.now() / 1000 - Number(table.dataset.first)) / 6 - 20)) };
+            if (mode === 2) {
+                const channelWidth = table.querySelector('.epg__channel-col').getBoundingClientRect().width;
+                return { actual: table.scrollLeft,
+                    expected: Math.min(table.scrollWidth - table.clientWidth,
+                        Math.max(0, (Date.now() / 1000 - Number(table.dataset.first)) / 6 - (table.clientWidth - channelWidth) / 3)) };
+            }
             const rows = table.querySelectorAll('#tbl1body tr');
             const elapsed = Date.now() / 1000 - Number(table.dataset.slotStart);
             const row = rows[Math.floor(elapsed / 7200)];
+            const headerHeight = table.querySelector('.serviceheader').getBoundingClientRect().height;
             return { actual: table.scrollTop, expected: row.getBoundingClientRect().top - table.getBoundingClientRect().top +
                 table.scrollTop + row.getBoundingClientRect().height * (elapsed % 7200) / 7200 -
-                table.querySelector('.serviceheader').getBoundingClientRect().height };
+                headerHeight - (table.clientHeight - headerHeight) / 3 };
         }, mode);
         assert.ok(Math.abs(position.actual - position.expected) < 2, JSON.stringify(position));
     });
@@ -458,8 +749,10 @@ for (const mode of [1, 2]) {
             assert.deepEqual(loads.at(-1), { mode, day: 0, week: 0 });
             assert.equal(await intervalCount(page), 1);
             const position = await page.locator('#fulltbl').evaluate((table, mode) => {
-                const expected = mode === 1 ? (Date.now() / 1000 - Number(table.dataset.slotStart)) / 15 :
-                    (Date.now() / 1000 - Number(table.dataset.first)) / 6 - 20;
+                const header = table.querySelector(mode === 1 ? '.serviceheader' : '.epg__channel-col').getBoundingClientRect();
+                const expected = mode === 1 ? (Date.now() / 1000 - Number(table.dataset.slotStart)) / 15 -
+                    (table.clientHeight - header.height) / 3 :
+                    (Date.now() / 1000 - Number(table.dataset.first)) / 6 - (table.clientWidth - header.width) / 3;
                 return { actual: mode === 1 ? table.scrollTop : table.scrollLeft, expected };
             }, mode);
             assert.ok(Math.abs(position.actual - position.expected) < 2, JSON.stringify(position));

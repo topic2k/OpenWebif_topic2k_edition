@@ -3045,3 +3045,15 @@ msgstr "Leerzeichen werden als Unterstriche gespeichert. Unterstriche werden als
 #: ../plugin/controllers/i18n.py
 msgid "Recordings"
 msgstr "Aufnahmen"
+
+#: ../plugin/controllers/i18n.py
+msgid "EPG TV Guide: hourly lines"
+msgstr "EPG-Zeitschrift: stündliche Linien"
+
+#: ../plugin/controllers/i18n.py
+msgid "Disabled: lines every two hours"
+msgstr "Ausgeschaltet: Linien alle zwei Stunden"
+
+#: ../plugin/controllers/i18n.py
+msgid "EPG: separator lines between channels"
+msgstr "EPG: Trennlinien zwischen Sendern"

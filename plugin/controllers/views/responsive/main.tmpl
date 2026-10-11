@@ -55,7 +55,7 @@
 	<link rel="stylesheet" type="text/css" href="/modern/css/bootstrap-chosen.min.css">
 	<link rel="stylesheet" type="text/css" href="/modern/css/timepicker.min.css">
 	<link rel="stylesheet" type="text/css" href="/modern/css/responsive.min.css">
-	<link rel="stylesheet" type="text/css" href="/modern/css/multiepg.min.css?v=epg2">
+	<link rel="stylesheet" type="text/css" href="/modern/css/multiepg.min.css?v=epg3">
 	<style>
 		.card .header .list-tag-filter-toolbar { display: flex; align-items: center; gap: 6px; }
 		.card .header .list-tag-filter-toolbar > li { display: flex; align-items: center; }
@@ -503,6 +503,24 @@
 							</ul>
 							<p>$tstrings['common_settings']</p>
 							<ul class="setting-list">
+								<li>
+									<span>$tstrings['epg_hourly_lines']<br><small>$tstrings['epg_hourly_lines_hint']</small></span>
+									<div class="switch">
+										<label>
+											<input type="checkbox" name="epg_hourly_lines" id="epg_hourly_lines" aria-label="$tstrings['epg_hourly_lines']" $isSettingEnabled('epg_hourly_lines')>
+											<span class="lever switch--skinned"></span>
+										</label>
+									</div>
+								</li>
+								<li>
+									<span>$tstrings['epg_channel_lines']</span>
+									<div class="switch">
+										<label>
+											<input type="checkbox" name="epg_channel_lines" id="epg_channel_lines" aria-label="$tstrings['epg_channel_lines']" $isSettingEnabled('epg_channel_lines')>
+											<span class="lever switch--skinned"></span>
+										</label>
+									</div>
+								</li>
 								<!--
 								<li>
 									<span>$tstrings['showfullremoteshort']</span>
@@ -977,14 +995,14 @@
 ##   .filter((tag) => tag.tagName === 'script')
 ##   .join('')
 ## %>
-<script src="/modern/js/vendors-app.js?v1.2.45"></script><script src="/modern/js/owif-app.js?v1.2.45"></script>
+<script src="/modern/js/vendors-app.js?v1.2.46"></script><script src="/modern/js/owif-app.js?v1.2.46"></script>
 
 <script src="/modern/js/epgtime.min.js?v=epg2"></script>
-<script src="/modern/js/responsive-multiepg.min.js?v=epg3"></script>
+<script src="/modern/js/responsive-multiepg.min.js?v=epg4"></script>
 <script src="/modern/js/bootstrap-date-timepicker.min.js"></script>
 <script src="/modern/js/admin.min.js?v=wp"></script>
 <script src="/modern/plugins/choices/choices.min.js"></script>
-<script src="/modern/js/responsive.min.js?v1.2.45"></script>
+<script src="/modern/js/responsive.min.js?v1.2.46"></script>
 <script>initJsTranslationAddon($dumps($tstrings))</script>
 
 <script>

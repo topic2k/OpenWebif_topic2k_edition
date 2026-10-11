@@ -26,7 +26,9 @@ class EpgTitleParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         if tag == 'a' and 'ui-widget-content' in attrs.get('class', '').split():
-            self.tooltips.append(attrs.pop('title', None))
+            assert 'title' not in attrs, 'No native tooltip may bypass the 1.5-second delay'
+        if tag == 'span' and 'ename' in attrs.get('class', '').split():
+            self.tooltips.append(attrs.pop('data-epg-title'))
         self.elements.append((tag, attrs))
         if tag == 'span':
             if self.title_depth:

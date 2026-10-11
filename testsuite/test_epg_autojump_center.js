@@ -32,7 +32,7 @@ function runGuide(hour, minute, enabled = true, startHour = 0) {
 		static now() { return new FixedDate().getTime(); }
 	};
 	const slotStart = Math.floor(new Date(2026, 8, 28, startHour).getTime() / 1000);
-	const context = runScript(jumpConfig + functionSource('autoJumpTvGuide'), {
+	const context = runScript(jumpConfig + functionSource('guidePosition') + '\n' + functionSource('autoJumpTvGuide'), {
 		jQuery: $, Date: FixedDate,
 		config: {day: 0, slotStart, jumpNow: enabled, jumpActiveService: false, currentServiceRef: ''}
 	});

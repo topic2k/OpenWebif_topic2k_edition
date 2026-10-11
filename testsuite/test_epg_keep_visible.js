@@ -46,7 +46,7 @@ function runScroll(mode) {
 			getBoundingClientRect() { return {top: 180 - scroll + (this._epgShift || 0)}; }
 		};
 		const events = [[-80, 180, first], [180, 300, second]].map(([top, bottom, info]) => ({
-			style: {}, getBoundingClientRect: () => ({top: top - scroll, bottom: bottom - scroll, left: 0, right: 200}),
+			style: {}, getBoundingClientRect: () => ({top: top - scroll, bottom: bottom - scroll, height: bottom - top, left: 0, right: 200}),
 			querySelector: () => info
 		}));
 		container.querySelector = () => ({offsetHeight: 40});
@@ -90,6 +90,15 @@ test('Zeitschrift: beim Scrollen verdeckt eine Sendung ihre Nachfolger nicht', (
 	update();
 	assert.equal(elements.second._epgShift, 60);
 	assert.ok(elements.events.every(event => event.style.transform === undefined), 'Time blocks must never be shifted');
+});
+
+test('Zeitschrift: kurze Titel bleiben an ihrer Startzeit und überdecken den Nachfolger nicht', () => {
+	const {elements, update} = runScroll('guide');
+	elements.first.offsetHeight = 256;
+	update();
+	assert.equal(elements.first._epgShift, 4);
+	assert.equal(elements.second._epgShift, 0);
+	assert.ok(-80 + elements.first._epgShift + elements.first.offsetHeight <= 180);
 });
 
 test('Zeitstrahl: Text folgt horizontalem Scrollen und bleibt im Sendungsblock', () => {

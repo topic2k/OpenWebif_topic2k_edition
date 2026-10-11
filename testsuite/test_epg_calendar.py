@@ -123,7 +123,8 @@ class EpgCalendarTests(unittest.TestCase):
                     'getMultiEpg': lambda _self, _bref, start, *_args, **_kwargs: {'start': start},
                     'config': SimpleNamespace(OpenWebif=SimpleNamespace(webcache=SimpleNamespace(
                         mepgmode=SimpleNamespace(value=0), epg_jump_now=SimpleNamespace(value=0),
-                        epg_jump_active_service=SimpleNamespace(value=0)))),
+                        epg_jump_active_service=SimpleNamespace(value=0), epg_hourly_lines=SimpleNamespace(value=True),
+                        epg_channel_lines=SimpleNamespace(value=True)))),
                     'NavigationInstance': SimpleNamespace(instance=None),
                     'localtime': lambda: localtime(mktime((2026, 10, 1, 12, 0, 0, -1, -1, -1))),
                     'mktime': mktime,

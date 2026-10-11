@@ -73,10 +73,54 @@ class RenderedModernEpgTests(unittest.TestCase):
                     if mode == 2:
                         context.update(timeline_start=slot_start, timeline_end=slot_start + 86400)
                     fixtures['%d:%d:%d' % (mode, day, week)] = str(template(searchList=[context]))
+                    fixtures['%d:%d:%d:grid-off' % (mode, day, week)] = str(template(searchList=[
+                        {**context, 'epg_hourly_lines': False, 'epg_channel_lines': False}]))
                     context['current_service_ref'] = CONFIG_PROBE
                     fixtures['%d:%d:%d:hostile' % (mode, day, week)] = str(template(searchList=[context]))
-                    geometry_events = {}
                     base = MIDNIGHT + (day + week * 7) * 86400
+                    boundary_start = base + 18 * 3600 if mode == 1 else base
+                    boundary_events = {}
+                    for channel_index, channel in enumerate(events):
+                        slots = [[] for _ in range(12 if mode == 1 else 1)]
+                        minute = 57 if channel_index == 0 else 56
+                        intervals = [(3000, base + 18 * 3600 + 30 * 60, (60 + minute - 30) * 60,
+                                      'Sportschau', 'Logo Sportschau'),
+                                     (3001, base + 19 * 3600 + minute * 60, (60 - minute) * 60,
+                                      'Lotto am Samstag' if channel_index == 0 else 'SAT.1 :newstime',
+                                      'Die Gewinnzahlen' if channel_index == 0 else 'SAT.1 :newstime Information, D 2026'),
+                                     (3002, base + 20 * 3600, 15 * 60, 'Tagesschau', 'Tagesschau Logo'),
+                                     (3003, base + 20 * 3600 + 15 * 60, 90 * 60, 'Verstehen Sie Spaß?', 'Unterhaltung')]
+                        for event_id, begin, duration, title, description in intervals:
+                            event = {'id': event_id, 'ref': channel, 'begin_timestamp': begin,
+                                     'duration': duration, 'title': title, 'shortdesc': description,
+                                     'timerStatus': '', 'timer': None}
+                            if event_id == 3001:
+                                event['timer'] = {'sref': channel, 'begin': begin, 'end': begin + duration,
+                                                  'markerType': 'record', 'isEnabled': True, 'isAutoTimer': False}
+                            slots[int((begin - boundary_start) // 7200) if mode == 1 else 0].append(event)
+                        boundary_events[channel] = slots
+                    boundary_context = {**context, 'slot_start': boundary_start, 'events': boundary_events,
+                                        'current_service_ref': ''}
+                    fixtures['%d:%d:%d:boundary' % (mode, day, week)] = str(template(searchList=[boundary_context]))
+                    aligned_events = {}
+                    for channel_index, channel in enumerate(events):
+                        slots = [[] for _ in range(12 if mode == 1 else 1)]
+                        for event_id, minute, duration in ((4000, 715, 5), (4001, 720, 3),
+                                                           (4002, 723, 42), (4003, 765, 3)):
+                            begin = base + minute * 60
+                            event = {'id': event_id, 'ref': channel, 'begin_timestamp': begin,
+                                     'duration': duration * 60,
+                                     'title': 'Eine sehr kurze Sendung mit einem vollständig sichtbaren langen Titel' if channel_index else 'Tagesschau',
+                                     'shortdesc': 'Verborgene Details <b>mit Information</b> &amp; mehr',
+                                     'timerStatus': '', 'timer': None}
+                            slots[minute // 120 if mode == 1 else 0].append(event)
+                        aligned_events[channel] = slots
+                    fixtures['%d:%d:%d:alignment' % (mode, day, week)] = str(template(searchList=[
+                        {**context, 'slot_start': base, 'events': aligned_events, 'current_service_ref': ''}]))
+                    fixtures['%d:%d:%d:alignment-grid-off' % (mode, day, week)] = str(template(searchList=[
+                        {**context, 'slot_start': base, 'events': aligned_events, 'current_service_ref': '',
+                         'epg_hourly_lines': False, 'epg_channel_lines': False}]))
+                    geometry_events = {}
                     for channel_index, channel in enumerate(events):
                         slots = [[] for _ in range(12 if mode == 1 else 1)]
                         intervals = [
@@ -134,9 +178,16 @@ class RenderedModernEpgTests(unittest.TestCase):
                             fixtures['%d:%d:%d%s:other' % (mode, day, week, variant)] = other
 
         main = (VIEWS.parent / 'main.tmpl').read_text(encoding='utf-8')
+        settings_start = main.index('<li>', main.index("$tstrings['common_settings']"))
+        settings_end = main.index('<!--', settings_start)
+        with patch.dict('sys.modules', modules):
+            grid_settings = str(Template(source=main[settings_start:settings_end], searchList=[{
+                'isSettingEnabled': lambda key: 'checked',
+                'tstrings': translations.tstrings,
+            }]))
         assets = {}
         asset_tags = []
-        for name in ('css/multiepg.min.css', 'js/epgtime.min.js', 'js/responsive-multiepg.min.js'):
+        for name in ('css/multiepg.min.css', 'js/responsive.min.js', 'js/epgtime.min.js', 'js/responsive-multiepg.min.js'):
             url = '/modern/' + name
             tag = re.search(r'<(?:link|script)\b[^>]*(?:href|src)="' + re.escape(url) +
                             r'(?:\?[^"\s]*)?"[^>]*>(?:</script>)?', main)
@@ -146,7 +197,7 @@ class RenderedModernEpgTests(unittest.TestCase):
         self.assertLess(main.index('/modern/js/epgtime.min.js'), main.index('/modern/js/responsive-multiepg.min.js'))
 
         data = {'now': NOW * 1000, 'midnight': MIDNIGHT, 'bouquet': BOUQUET, 'otherBouquet': OTHER_BOUQUET,
-                'shell': shell, 'pages': fixtures, 'configProbe': CONFIG_PROBE,
+                'shell': shell, 'gridSettings': grid_settings, 'pages': fixtures, 'configProbe': CONFIG_PROBE,
                 'assets': assets, 'assetTags': '\n'.join(asset_tags),
                 'jquery': (ROOT / 'plugin/public/js/jquery-2.2.4.min.js').read_text(encoding='utf-8'),
                 'css': (ROOT / 'plugin/public/modern/css/style.min.css').read_text(encoding='utf-8')}

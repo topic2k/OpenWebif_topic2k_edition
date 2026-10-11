@@ -1376,6 +1376,15 @@ function WebConfig() {
 		let val = $(this).is(":checked") ? '1' : '0'
 		$.get('api/setwebconfig?epg_jump_active_service=' + val);
 	});
+	$('#epg_hourly_lines, #epg_channel_lines').change(function () {
+		let key = this.id;
+		let enabled = $(this).is(":checked");
+		$.get('api/setwebconfig?' + key + '=' + (enabled ? '1' : '0'), function(result) {
+			if (result.result) {
+				$(window).trigger('epgGridSettings', [{[key === 'epg_hourly_lines' ? 'hourlyLines' : 'channelLines']: enabled}]);
+			}
+		});
+	});
 	$('#zapstream').change(function () {
 		let val = $(this).is(":checked") ? '1' : '0'
 		$.get('api/setwebconfig?zapstream=' + val);

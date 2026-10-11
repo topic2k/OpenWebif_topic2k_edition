@@ -185,6 +185,7 @@ class ModernEpgChannelIdentityTests(unittest.TestCase):
                     'bref': quote(bouquet), 'slotStart': self.start, 'first': self.start,
                     'dateLabels': {'weekdays': [''] * 7, 'months': [''] * 12},
                     'jumpNow': 1, 'jumpActiveService': 1, 'currentServiceRef': REFS[1],
+                    'hourlyLines': True, 'channelLines': True,
                     **({'timelineEnd': self.start + 10800} if mode == 2 else {}),
                 })
                 prime_times = [int(attrs['data-time']) for _, attrs in parser.elements

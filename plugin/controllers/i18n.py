@@ -655,6 +655,9 @@ tstrings = {
 	'transcoding_mode': _("Transcoding Mode"),
 	'epg_autojump': _("EPG Auto-Jump"),
 	'epg_jump_now': _("Jump to current time in EPG"),
-	'epg_jump_active_service': _("Jump to active channel in EPG")
+	'epg_jump_active_service': _("Jump to active channel in EPG"),
+	'epg_hourly_lines': _("EPG TV Guide: hourly lines"),
+	'epg_hourly_lines_hint': _("Disabled: lines every two hours"),
+	'epg_channel_lines': _("EPG: separator lines between channels")
 
 }

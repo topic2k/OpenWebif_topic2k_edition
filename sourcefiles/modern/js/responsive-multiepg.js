@@ -61,6 +61,41 @@ var reloadTimers = false;
 		return Math.max(0, Math.min(edge - start, end - start - size));
 	}
 
+	function buildEpgGuideGrid(start, constraints) {
+		var times = new Set();
+		var endings = {};
+		for (var slot = 0; slot <= 12; slot++) times.add(start + slot * 7200);
+		constraints.forEach(function(event) {
+			times.add(event.start);
+			times.add(event.end);
+			if (!endings[event.end]) endings[event.end] = [];
+			endings[event.end].push(event);
+		});
+		var positions = {};
+		var grid = [];
+		Array.from(times).sort(function(a, b) { return a - b; }).forEach(function(time, index) {
+			var previous = grid[index - 1];
+			var position = previous ? previous.position + (time - previous.time) / EpgTime.guideSecondsPerPixel : 0;
+			(endings[time] || []).forEach(function(event) {
+				position = Math.max(position, Math.ceil(positions[event.start] + event.height));
+			});
+			positions[time] = position;
+			grid.push({time: time, position: position});
+		});
+		return grid;
+	}
+
+	function epgGuideValue(grid, value, from, to) {
+		var low = 0, high = grid.length - 1;
+		while (high - low > 1) {
+			var middle = Math.floor((low + high) / 2);
+			if (grid[middle][from] <= value) low = middle;
+			else high = middle;
+		}
+		var first = grid[low], last = grid[high];
+		return first[to] + (value - first[from]) / (last[from] - first[from]) * (last[to] - first[to]);
+	}
+
 	function init(config) {
 		if (disposeCurrent) disposeCurrent();
 		var scope = jQuery('#modern-epg');
@@ -72,6 +107,9 @@ var reloadTimers = false;
 		var frame;
 		var jumpTimeout;
 		var visibleTimeout;
+		var guideGrid;
+		var tooltipTimeout;
+		var tooltip = jQuery('<div class="epg__tooltip" role="tooltip" id="epg-tooltip" hidden></div>').appendTo(scope)[0];
 		var observer = new MutationObserver(function() {
 			if (!jQuery.contains(document, tableNode)) dispose();
 		});
@@ -83,6 +121,9 @@ var reloadTimers = false;
 			if (stopMarker) stopMarker();
 			clearTimeout(jumpTimeout);
 			clearTimeout(visibleTimeout);
+			hideEpgTooltip();
+			tooltip.remove();
+			scope.off('.epgTooltip');
 			cancelAnimationFrame(frame);
 			observer.disconnect();
 			tableNode.removeEventListener('scroll', schedule);
@@ -102,6 +143,44 @@ var reloadTimers = false;
 			return Math.max(0, Math.min(left, tableNode.scrollWidth - tableNode.clientWidth));
 		}
 
+		function guidePosition(time) {
+			return guideGrid ? epgGuideValue(guideGrid, time, 'time', 'position') : EpgTime.guidePosition(time, config.slotStart);
+		}
+
+		function guideTimeAt(position) {
+			return guideGrid ? epgGuideValue(guideGrid, position, 'position', 'time') : config.slotStart + position * EpgTime.guideSecondsPerPixel;
+		}
+
+		function updateHourLines() {
+			if (config.mode !== 1) return;
+			var interval = config.hourlyLines === false ? 2 : 1;
+			tableNode.querySelectorAll('.epg__slot').forEach(function(surface) {
+				surface.querySelectorAll('.epg__hour-line').forEach(function(line) { line.remove(); });
+				var start = config.slotStart + Number(surface.dataset.slot) * 7200;
+				var hour = EpgTime.dateAt(start);
+				hour.setMinutes(0, 0, 0);
+				for (var time = hour.getTime() / 1000; time < start + 7200; time += 3600) {
+					if (time < start || EpgTime.dateAt(time).getHours() % interval) continue;
+					var line = document.createElement('div');
+					line.className = 'epg__hour-line';
+					line.setAttribute('aria-hidden', 'true');
+					line.dataset.time = time;
+					line.style.top = guidePosition(time) - guidePosition(start) + 'px';
+					surface.appendChild(line);
+				}
+			});
+		}
+		scope.toggleClass('epg--channel-lines', config.channelLines !== false);
+		jQuery(window).on('epgGridSettings.epgTable', function(event, options) {
+			if (!alive()) return;
+			if (options.hourlyLines !== undefined) config.hourlyLines = options.hourlyLines;
+			if (options.channelLines !== undefined) config.channelLines = options.channelLines;
+			scope.toggleClass('epg--channel-lines', config.channelLines !== false);
+			fixTableHeight();
+			if (config.mode === 1 && config.day === 0 && config.week === 0) updateTvGuideNowMarker();
+			schedule();
+		});
+
 		function updateEpgDateRange() {
 			if (!alive()) return;
 			var container = tableNode;
@@ -120,14 +199,21 @@ var reloadTimers = false;
 			}
 			if (container.classList.contains('epg__tv-guide')) {
 				var slotStart = Number(container.getAttribute('data-slot-start'));
+				var origin = guideGrid && container.querySelector('.epg__slot');
+				var originTop = origin ? origin.getBoundingClientRect().top : bounds.top;
 				container.querySelectorAll('#tbl1body tr').forEach(function(row, index) {
 					var rect = row.getBoundingClientRect();
 					if (!visible(rect)) return;
 					// Use the row's two-hour slot even when its channel has no EPG events.
-					var startFraction = Math.max(0, (bounds.top - rect.top) / (rect.bottom - rect.top));
-					var endFraction = Math.min(1, (bounds.bottom - rect.top) / (rect.bottom - rect.top));
-					addDate(EpgTime.slotTime(slotStart, index, startFraction));
-					addDate(EpgTime.slotTime(slotStart, index, endFraction) - 1);
+					if (guideGrid) {
+						addDate(Math.max(slotStart + index * 7200, guideTimeAt(Math.max(bounds.top, rect.top) - originTop)));
+						addDate(Math.min(slotStart + (index + 1) * 7200, guideTimeAt(Math.min(bounds.bottom, rect.bottom) - originTop)) - 1);
+					} else {
+						var startFraction = Math.max(0, (bounds.top - rect.top) / (rect.bottom - rect.top));
+						var endFraction = Math.min(1, (bounds.bottom - rect.top) / (rect.bottom - rect.top));
+						addDate(EpgTime.slotTime(slotStart, index, startFraction));
+						addDate(EpgTime.slotTime(slotStart, index, endFraction) - 1);
+					}
 				});
 				container.querySelectorAll('.epg__event[data-begin]').forEach(function(event) {
 					if (visible(event.getBoundingClientRect())) addDate(Number(event.getAttribute('data-begin')));
@@ -159,18 +245,108 @@ var reloadTimers = false;
 		function layoutTvGuide() {
 			if (!tableNode.classList.contains('epg__tv-guide')) return;
 			tableNode.querySelectorAll('.epg__slot').forEach(function(surface) {
-				var slotOffset = Number(surface.getAttribute('data-slot')) * 480;
+				var slotTime = config.slotStart + Number(surface.getAttribute('data-slot')) * 7200;
+				var slotOffset = guidePosition(slotTime);
+				surface.style.height = guidePosition(slotTime + 7200) - slotOffset + 'px';
 				surface.querySelectorAll('.epg__event[data-begin][data-end]').forEach(function(event) {
 					var interval = EpgTime.interval(Number(event.getAttribute('data-begin')), Number(event.getAttribute('data-end')),
 						config.slotStart, config.slotStart + 86400, EpgTime.guideSecondsPerPixel);
 					event.style.display = interval ? '' : 'none';
 					if (!interval) return;
-					event.style.top = interval.offset - slotOffset + 'px';
-					event.style.height = interval.length + 'px';
+					event.style.top = guidePosition(interval.start) - slotOffset + 'px';
+					event.style.height = (guideGrid ? guidePosition(interval.end) - guidePosition(interval.start) : interval.length) + 'px';
 				});
 			});
 		}
 		layoutTvGuide();
+
+		function layoutTvGuideLabels() {
+			if (!tableNode.classList.contains('epg__tv-guide')) return;
+			var origin = tableNode.querySelector('.epg__slot');
+			if (!origin) return;
+			var constraints = [];
+			var events = tableNode.querySelectorAll('.epg__event[data-begin]');
+			events.forEach(function(event) {
+				var info = event.querySelector('.epg__event-info');
+				info.style.maxHeight = 'none';
+				info.style.top = '';
+				info.style.transform = '';
+				info._epgShift = 0;
+				event.classList.remove('epg__details-hidden');
+				var interval = EpgTime.interval(Number(event.dataset.begin), Number(event.dataset.end),
+					config.slotStart, config.slotStart + 86400, EpgTime.guideSecondsPerPixel);
+				if (!interval) return;
+				var title = event.querySelector('.epg__title');
+				var time = event.querySelector('.epg__time--start');
+				constraints.push({start: interval.start, end: interval.end,
+					height: Math.ceil(Math.max(title.getBoundingClientRect().height, time.getBoundingClientRect().height)) + 4});
+			});
+			guideGrid = buildEpgGuideGrid(config.slotStart, constraints);
+			layoutTvGuide();
+			events.forEach(function(event) {
+				if (event.style.display === 'none') return;
+				var info = event.querySelector('.epg__event-info');
+				event.classList.toggle('epg__details-hidden', info.getBoundingClientRect().height > event.getBoundingClientRect().height - 4);
+				info.style.maxHeight = '100%';
+			});
+		}
+
+		function layoutTimelineLabels() {
+			if (config.mode !== 2) return;
+			tableNode.querySelectorAll('.epg__timeline-row').forEach(function(row) {
+				var height = 60;
+				var events = row.querySelectorAll('.eventlist .event');
+				events.forEach(function(event) {
+					event.classList.remove('epg__details-hidden');
+					var titleHeight = Math.ceil(event.querySelector('.ename').getBoundingClientRect().height);
+					height = Math.max(height, titleHeight + 6);
+					var time = event.querySelector('.etime');
+					event.classList.toggle('epg__details-hidden', event.querySelector('.epg__timeline-info').getBoundingClientRect().height > 58 ||
+						time.scrollWidth > time.clientWidth);
+				});
+				row.style.setProperty('--epg-row-height', height + 'px');
+			});
+		}
+
+		function updateCurrentEvents() {
+			var now = EpgTime.now();
+			tableNode.querySelectorAll('.event[data-begin][data-end]').forEach(function(event) {
+				event.classList.toggle('curevent', Number(event.dataset.begin) <= now && now < Number(event.dataset.end));
+			});
+		}
+
+		function hideEpgTooltip() {
+			clearTimeout(tooltipTimeout);
+			tooltip.hidden = true;
+			scope.find('[aria-describedby="epg-tooltip"]').removeAttr('aria-describedby');
+		}
+
+		scope.on('mouseenter.epgTooltip focusin.epgTooltip', '.event[data-begin]', function(event) {
+			hideEpgTooltip();
+			if (event.target.closest('.epg__timer-marker')) return;
+			var programme = this;
+			var details = programme.querySelector('.epg__desc');
+			if (!programme.classList.contains('epg__details-hidden') && (!details || details.scrollHeight <= details.clientHeight)) return;
+			tooltipTimeout = setTimeout(function() {
+				if (!alive()) return;
+				var title = programme.querySelector('.epg__title, .ename');
+				var description = programme.querySelector('.epg__desc, .epg__tooltip-details');
+				if (description) {
+					description = description.cloneNode(true);
+					description.querySelectorAll('.epg__timer-status').forEach(function(status) { status.remove(); });
+				}
+				tooltip.textContent = (title.dataset.epgTitle || title.textContent.trim()) + '\n' + EpgTime.dateAt(Number(programme.dataset.begin)).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) +
+					' – ' + EpgTime.dateAt(Number(programme.dataset.end)).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) +
+					(description ? '\n' + description.textContent.trim() : '');
+				tooltip.hidden = false;
+				var rect = programme.getBoundingClientRect();
+				tooltip.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - tooltip.offsetWidth - 8)) + 'px';
+				tooltip.style.top = Math.max(8, Math.min(rect.top + 24, window.innerHeight - tooltip.offsetHeight - 8)) + 'px';
+				programme.setAttribute('aria-describedby', 'epg-tooltip');
+			}, 1500);
+		}).on('mouseleave.epgTooltip focusout.epgTooltip click.epgTooltip', '.event[data-begin]', hideEpgTooltip)
+			.on('keydown.epgTooltip', function(event) { if (event.key === 'Escape') hideEpgTooltip(); });
+		scope.on('scroll.epgTooltip', '#fulltbl', hideEpgTooltip);
 
 		function updateKeepVisible() {
 			pending = false;
@@ -216,7 +392,12 @@ var reloadTimers = false;
 		tableNode.addEventListener('scroll', schedule);
 		jQuery(window).off('resize.epgKeepVisible').on('resize.epgKeepVisible', schedule);
 		schedule();
-		visibleTimeout = setTimeout(schedule, 150);
+		visibleTimeout = setTimeout(function() {
+			fixTableHeight();
+			updateEpgDateRange();
+			if (config.mode === 1 && config.day === 0 && config.week === 0) updateTvGuideNowMarker();
+			schedule();
+		}, 150);
 
 		function fixTableHeight() {
 			var table = jQuery('#fulltbl');
@@ -227,6 +408,11 @@ var reloadTimers = false;
 			var bottomPadding = parseFloat(body.css('padding-bottom')) || 0;
 			table.height(Math.max(140, card[0].getBoundingClientRect().bottom - table[0].getBoundingClientRect().top - bottomPadding));
 			table.width(body.width());
+			layoutTvGuideLabels();
+			layoutTimelineLabels();
+			updateHourLines();
+			updateCurrentEvents();
+			hideEpgTooltip();
 		}
 		fixTableHeight();
 		updateEpgDateRange();
@@ -234,6 +420,7 @@ var reloadTimers = false;
 		jQuery(window).off('resize.epgTable').on('resize.epgTable', function(){ fixTableHeight(); updateEpgDateRange(); });
 
 		function updateTvGuideNowMarker() {
+			updateCurrentEvents();
 			var marker = scope.find('.epg__tv-guide-now');
 			var rows = jQuery('#tbl1body tr');
 			var slot = EpgTime.slot(EpgTime.now(), config.slotStart);
@@ -247,7 +434,7 @@ var reloadTimers = false;
 				marker.hide();
 				return;
 			}
-			var top = origin.offset().top - container.offset().top + container.scrollTop() + EpgTime.guidePosition(EpgTime.now(), config.slotStart);
+			var top = origin.offset().top - container.offset().top + container.scrollTop() + guidePosition(EpgTime.now());
 			marker.css({top: top + 'px', width: jQuery('#tbl1').outerWidth() + 'px'}).show();
 		}
 		if (config.day === 0 && config.week === 0) {
@@ -258,6 +445,7 @@ var reloadTimers = false;
 				var inner = scope.find('#tblinner');
 				stopMarker = startEpgNowMarker(marker, function() {
 					var now = EpgTime.now();
+					updateCurrentEvents();
 					if (now < config.first || now >= config.timelineEnd) {
 						marker.hide();
 						return;
@@ -400,14 +588,20 @@ var reloadTimers = false;
 							var origin = jQuery('#tbl1body .epg__slot').first();
 							if (!origin.length) return;
 							var headerHeight = jQuery('.serviceheader').first().outerHeight() || 0;
-							var top = origin.offset().top - container.offset().top + container.scrollTop() + EpgTime.guidePosition(targetTime, config.slotStart) - headerHeight;
+							var top = origin.offset().top - container.offset().top + container.scrollTop() + guidePosition(targetTime) - headerHeight;
+							if (d == 0) top -= Math.max(0, tableNode.clientHeight - headerHeight) / 3;
 							container.animate({scrollTop: Math.max(0, top)}, 500);
 						} else if (slot.index < 0) {
 							jQuery('#fulltbl').animate({scrollTop: 0}, 500);
 						}
 					} else {
 						var pos = EpgTime.timelinePosition(targetTime, config.first);
-						jQuery('#fulltbl').animate({scrollLeft: clampTimelineScroll(pos - 160)}, 500);
+						var offset = 160;
+						if (d == 0) {
+							var channelWidth = jQuery('.epg__channel-col').first().outerWidth() || 0;
+							offset = channelWidth + Math.max(0, tableNode.clientWidth - channelWidth) / 3;
+						}
+						jQuery('#fulltbl').animate({scrollLeft: clampTimelineScroll(pos - offset)}, 500);
 					}
 				} else if (day > 100) {
 					var mode = day - 100;
@@ -470,7 +664,7 @@ var reloadTimers = false;
 					if (slot.index >= 0 && slot.index < 12) {
 						var origin = jQuery('#tbl1body .epg__slot').first();
 						if (origin.length) {
-							var targetY = origin.offset().top - containerTop + containerScroll + EpgTime.guidePosition(EpgTime.now(), config.slotStart) - headerHeight - (container.height() - headerHeight) * 0.3;
+							var targetY = origin.offset().top - containerTop + containerScroll + guidePosition(EpgTime.now()) - headerHeight - (container.height() - headerHeight) * 0.3;
 							container.scrollTop(Math.max(0, targetY));
 						}
 					}

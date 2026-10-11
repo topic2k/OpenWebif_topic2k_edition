@@ -6,7 +6,7 @@ const {functionSource, callbackSource, runScript} = require('./test_epg_source')
 
 const template = fs.readFileSync(path.join(__dirname, '..', 'plugin', 'controllers', 'views', 'responsive', 'ajax', 'multiepg.tmpl'), 'utf8');
 
-function jumpToTime(day, startHour = 0, primeTimeHour = {201: 6, 202: 12, 203: 20}[day]) {
+function jumpToTime(day, startHour = 0, primeTimeHour = {201: 6, 202: 12, 203: 20}[day], viewportHeight = 400) {
 	const code = callbackSource("scope.find('.plusclick').click(");
 	const scroller = {
 		position: 0,
@@ -33,8 +33,9 @@ function jumpToTime(day, startHour = 0, primeTimeHour = {201: 6, 202: 12, 203: 2
 	const FixedDate = class extends Date {
 		static now() { return new Date(2026, 8, 28, 10, 30).getTime(); }
 	};
-	runScript('(' + code + ').call({});', {
+	runScript(functionSource('guidePosition') + '\n(' + code + ').call({});', {
 		jQuery, Date: FixedDate,
+		tableNode: {clientHeight: viewportHeight},
 		config: {mode: 1, day: 0, week: 0, slotStart: Math.floor(new Date(2026, 8, 28, startHour).getTime() / 1000)}
 	});
 	return scroller.position;
@@ -48,6 +49,7 @@ function jumpOnTimeline(day, now = 37800, first = 0, targetTime = {201: 6, 202: 
 		if (typeof selector === 'object') return {data: name => name === 'day' ? day : targetTime};
 		if (selector === '#fulltbl') return scroller;
 		if (selector === '.timetable-now') return {css: () => '450px'};
+		if (selector === '.epg__channel-col') return {first: () => ({outerWidth: () => 140})};
 		throw new Error('Unexpected selector: ' + selector);
 	};
 	const FixedDate = class extends Date {
@@ -107,7 +109,14 @@ test('Zeitschrift springt vertikal zu 06:00, 12:00, 20:00 und Jetzt', () => {
 	assert.equal(jumpToTime(201), 1440);
 	assert.equal(jumpToTime(202), 2880);
 	assert.equal(jumpToTime(203), 4800);
-	assert.equal(jumpToTime(200), 2520);
+	assert.equal(jumpToTime(200), 2400);
+});
+
+test('Jetzt zeigt in der Zeitschrift ein Drittel des sichtbaren Zeitbereichs davor', () => {
+	for (const height of [400, 760, 1000]) {
+		assert.equal(jumpToTime(200, 0, undefined, height), 2520 - (height - 40) / 3);
+	}
+	assert.equal(jumpToTime(200, 10, undefined, 760), 0, 'Am Anfang bleibt der Sprung begrenzt');
 });
 
 test('Zeitschrift begrenzt vergangene Uhrzeiten vor dem ersten EPG-Slot', () => {
@@ -122,9 +131,15 @@ test('Zeitstrahl behält seinen horizontalen Uhrzeit-Sprung', () => {
 });
 
 test('Jetzt-Sprung im Zeitstrahl verwendet die aktuelle Uhrzeit statt einer veralteten Markierung', () => {
-	assert.equal(jumpOnTimeline(200), 6280);
-	assert.equal(jumpOnTimeline(200, 37920), 6300);
+	assert.equal(jumpOnTimeline(200), 6300 - 460 / 3);
+	assert.equal(jumpOnTimeline(200, 37920), 6320 - 460 / 3);
 	assert.equal(jumpOnTimeline(200, 0), 0);
+});
+
+test('Jetzt zeigt im Zeitstrahl ein Drittel des sichtbaren Zeitbereichs davor', () => {
+	for (const width of [400, 760, 1000]) {
+		assert.equal(jumpOnTimeline(200, 37800, 0, 0, 30140, width), 6300 - (width - 140) / 3);
+	}
 });
 
 test('beide Ansichten verwenden den serverseitigen data-time-Wert statt einer festen Primetime', () => {
@@ -134,7 +149,7 @@ test('beide Ansichten verwenden den serverseitigen data-time-Wert statt einer fe
 
 test('Zeitstrahl berücksichtigt den konfigurierten Tagesbeginn für Primetime und Jetzt', () => {
 	assert.equal(jumpOnTimeline(202, 37800, 3600), 6580);
-	assert.equal(jumpOnTimeline(200, 37800, 3600), 5680);
+	assert.equal(jumpOnTimeline(200, 37800, 3600), 5700 - 460 / 3);
 });
 
 test('Zeitstrahl begrenzt Uhrzeit- und Jetzt-Sprünge auf den tatsächlichen Scrollbereich', () => {

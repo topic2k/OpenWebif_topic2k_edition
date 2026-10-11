@@ -55,6 +55,7 @@ function startClock(mode = 2, day = 0, week = 0) {
 		return id;
 	};
 	const context = {jQuery, window, document, Date: FixedDate,
+		tableNode: {querySelectorAll: () => []},
 		scope: {find: jQuery}, config: {mode, day, week, first: 10000, slotStart: 10000},
 		setTimeout: (callback, delay) => schedule(callback, delay, false),
 		setInterval: (callback, delay) => schedule(callback, delay, true),
@@ -70,7 +71,7 @@ function startClock(mode = 2, day = 0, week = 0) {
 			disconnect() { observers.delete(this); }
 		}
 	};
-	const script = ['startEpgNowMarker', 'epgTimelineNowPosition', 'updateTvGuideNowMarker'].map(functionSource).join('\n') + '\n' +
+	const script = ['startEpgNowMarker', 'epgTimelineNowPosition', 'guidePosition', 'updateCurrentEvents', 'updateTvGuideNowMarker'].map(functionSource).join('\n') + '\n' +
 		sourceSection('if (config.day === 0 && config.week === 0)', 'var list = document.getElementById');
 	runScript(script, context);
 	return {
