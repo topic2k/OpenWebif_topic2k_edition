@@ -26,8 +26,10 @@ async function openEpg(t, mode = 1, variant = '', theme = '') {
     const errors = [];
     const unexpected = [];
     const loads = [];
+    const epgQueries = [];
     const assetLoads = [];
     const gridPreferences = {epg_hourly_lines: true, epg_channel_lines: true};
+    const epgPreferences = {epg_jump_on_resume: true};
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
         const url = new URL(route.request().url());
@@ -58,6 +60,7 @@ async function openEpg(t, mode = 1, variant = '', theme = '') {
                     getStatusInfo = function() {};
                     loadeventepg = function(id, ref) { window.eventCalls.push({ id, ref }); };
                 </script></head><body class="${theme}"><div id="header"></div>
+                <aside hidden><input type="checkbox" name="epg_jump_on_resume" id="epg_jump_on_resume" checked></aside>
                 <ul hidden id="grid-settings">${fixtures.gridSettings}</ul>${fixtures.shell}</body></html>` });
         }
         if (Object.hasOwn(fixtures.assets, url.pathname)) {
@@ -69,16 +72,22 @@ async function openEpg(t, mode = 1, variant = '', theme = '') {
             const day = Number(url.searchParams.get('day') || 0);
             const week = Number(url.searchParams.get('week') || 0);
             const bouquet = url.searchParams.get('bref');
+            epgQueries.push({bref: bouquet, epgmode: url.searchParams.get('epgmode'), day, week});
             if (bouquet) assert.ok([fixtures.bouquet, fixtures.otherBouquet].includes(bouquet));
             const gridOff = !gridPreferences.epg_hourly_lines && !gridPreferences.epg_channel_lines;
             const pageVariant = gridOff ? (variant ? variant + '-grid-off' : 'grid-off') : variant;
             const key = `${mode}:${day}:${week}${pageVariant ? ':' + pageVariant : ''}${bouquet === fixtures.otherBouquet ? ':other' : ''}`;
-            const markup = fixtures.pages[key];
+            const markup = fixtures.pages[key].replace(/(&quot;jumpOnResume&quot;:)(?:true|false)/,
+                `$1${epgPreferences.epg_jump_on_resume}`);
             assert.ok(markup, 'Missing rendered fixture for ' + key);
             loads.push({ mode, day, week });
             return route.fulfill({ contentType: 'text/html', body: markup });
         }
         if (url.pathname === '/api/setwebconfig') {
+            if (url.searchParams.has('epg_jump_on_resume')) {
+                epgPreferences.epg_jump_on_resume = url.searchParams.get('epg_jump_on_resume') === '1';
+                return route.fulfill({ json: { result: true } });
+            }
             for (const key of Object.keys(gridPreferences)) {
                 if (url.searchParams.has(key)) {
                     gridPreferences[key] = url.searchParams.get(key) === '1';
@@ -109,8 +118,19 @@ async function openEpg(t, mode = 1, variant = '', theme = '') {
     await page.addInitScript(() => {
         // Observe real interval lifecycle without replacing callbacks or EPG behaviour.
         window.epgIntervals = new Set();
+        window.epgVisibilityListeners = new Set();
         const start = window.setInterval;
         const stop = window.clearInterval;
+        const addDocumentListener = document.addEventListener.bind(document);
+        const removeDocumentListener = document.removeEventListener.bind(document);
+        document.addEventListener = function(type, listener, options) {
+            if (type === 'visibilitychange') window.epgVisibilityListeners.add(listener);
+            return addDocumentListener(type, listener, options);
+        };
+        document.removeEventListener = function(type, listener, options) {
+            if (type === 'visibilitychange') window.epgVisibilityListeners.delete(listener);
+            return removeDocumentListener(type, listener, options);
+        };
         window.setInterval = function(callback, delay, ...args) {
             const id = start(callback, delay, ...args);
             if (delay === 10000) window.epgIntervals.add(id);
@@ -130,7 +150,7 @@ async function openEpg(t, mode = 1, variant = '', theme = '') {
     await waitForDom(page, () => parseFloat(document.getElementById('fulltbl')?.style.height) > 0);
     await page.clock.runFor(200);
     t.after(() => context.close());
-    return { page, loads };
+    return { page, loads, epgQueries };
 }
 
 async function navigate(page, selector, expectedMode, expectedOffset) {
@@ -151,6 +171,18 @@ async function markerPosition(page, mode) {
 }
 
 async function intervalCount(page) { return page.evaluate(() => window.epgIntervals.size); }
+
+async function setEpgVisibility(page, visibility) {
+    await page.evaluate(visibility => {
+        if (!window.epgVisibilityHooked) {
+            window.epgVisibilityState = document.visibilityState;
+            Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => window.epgVisibilityState});
+            window.epgVisibilityHooked = true;
+        }
+        window.epgVisibilityState = visibility;
+        document.dispatchEvent(new Event('visibilitychange'));
+    }, visibility);
+}
 
 test('Zeitstrahl: gleich hohe Senderzeilen und gemeinsame Zeitgrenzen trotz langer kurzer Titel', async t => {
     const {page} = await openEpg(t, 2, 'alignment');
@@ -980,6 +1012,111 @@ for (const mode of [1, 2]) {
         await returnToNow();
     });
 
+    test(`${view}: Tab-Rückkehr lädt nach fünf Minuten heute neu und springt auf Jetzt`, async t => {
+        const { page, loads, epgQueries } = await openEpg(t, mode);
+        await navigate(page, '[data-day="1"]', mode, 1);
+        const before = await page.evaluate(mode => {
+            window.previousEpgTable = document.getElementById('fulltbl');
+            const table = window.previousEpgTable;
+            if (mode === 1) table.scrollTop = table.scrollHeight;
+            else table.scrollLeft = table.scrollWidth;
+            return {position: mode === 1 ? table.scrollTop : table.scrollLeft,
+                listeners: window.epgVisibilityListeners.size};
+        }, mode);
+        assert.ok(before.position > 0);
+        assert.equal(before.listeners, 1);
+        const beforeLoads = loads.length;
+
+        await setEpgVisibility(page, 'hidden');
+        await page.clock.setSystemTime(fixtures.now + 299999);
+        await setEpgVisibility(page, 'visible');
+        assert.equal(loads.length, beforeLoads, 'Ein Wechsel unter fünf Minuten lädt keine Daten nach');
+        assert.equal(await page.evaluate(() => document.getElementById('fulltbl') === window.previousEpgTable), true);
+        assert.equal(await page.locator('#fulltbl').evaluate((table, mode) => mode === 1 ? table.scrollTop : table.scrollLeft,
+            mode), before.position, 'Die gewählte Position bleibt nach kurzem Tabwechsel erhalten');
+
+        await setEpgVisibility(page, 'hidden');
+        await page.clock.setSystemTime(fixtures.now + 599999);
+        await setEpgVisibility(page, 'visible');
+        await waitForDom(page, ({mode}) => {
+            const table = document.getElementById('fulltbl');
+            const config = JSON.parse(document.getElementById('modern-epg').dataset.epgConfig);
+            return table && table !== window.previousEpgTable && config.mode === mode && config.day === 0 && config.week === 0;
+        }, {mode});
+        await page.clock.runFor(200);
+        assert.equal(loads.length, beforeLoads + 1);
+        assert.deepEqual(loads.at(-1), {mode, day: 0, week: 0});
+        assert.deepEqual(epgQueries.at(-1), {bref: fixtures.bouquet, epgmode: 'tv', day: 0, week: 0});
+        assert.equal(await intervalCount(page), 1);
+        assert.equal(await page.evaluate(() => window.epgVisibilityListeners.size), 1,
+            'Der ersetzte EPG hinterlässt genau einen Sichtbarkeits-Handler');
+        const after = await page.locator('#fulltbl').evaluate((table, mode) => mode === 1 ? table.scrollTop : table.scrollLeft,
+            mode);
+        assert.notEqual(after, before.position, 'Nach dem Datenabruf wird zur aktuellen Uhrzeit gesprungen');
+        await setEpgVisibility(page, 'visible');
+        assert.equal(loads.length, beforeLoads + 1, 'Ein wiederholtes Sichtbarereignis löst keinen zweiten Abruf aus');
+    });
+
+    test(`${view}: Tab-Rückkehr lässt sich in den Einstellungen deaktivieren und wieder aktivieren`, async t => {
+        const { page, loads, epgQueries } = await openEpg(t, mode);
+        assert.equal(await page.locator('#epg_jump_on_resume').isChecked(), true);
+        assert.equal(await page.locator('#modern-epg').evaluate(node => JSON.parse(node.dataset.epgConfig).jumpOnResume), true);
+        await navigate(page, '[data-day="1"]', mode, 1);
+        const previous = await page.evaluate(mode => {
+            window.previousEpgTable = document.getElementById('fulltbl');
+            const table = window.previousEpgTable;
+            if (mode === 1) table.scrollTop = table.scrollHeight;
+            else table.scrollLeft = table.scrollWidth;
+            return mode === 1 ? table.scrollTop : table.scrollLeft;
+        }, mode);
+        const beforeLoads = loads.length;
+
+        const savedOff = page.waitForResponse(response => {
+            const url = new URL(response.url());
+            return url.pathname === '/api/setwebconfig' && url.searchParams.get('epg_jump_on_resume') === '0';
+        });
+        await page.evaluate(() => {
+            const setting = document.getElementById('epg_jump_on_resume');
+            setting.checked = false;
+            setting.dispatchEvent(new Event('change', {bubbles: true}));
+        });
+        assert.equal((await savedOff).ok(), true);
+        await page.clock.runFor(10);
+        await setEpgVisibility(page, 'hidden');
+        await page.clock.setSystemTime(fixtures.now + 299999);
+        await setEpgVisibility(page, 'visible');
+        assert.equal(loads.length, beforeLoads, 'Die deaktivierte Option führt keinen Abruf aus');
+        assert.equal(await page.evaluate(() => document.getElementById('fulltbl') === window.previousEpgTable), true);
+        assert.equal(await page.locator('#fulltbl').evaluate((table, mode) => mode === 1 ? table.scrollTop : table.scrollLeft,
+            mode), previous, 'Ohne Auto-Sprung bleibt die ausgewählte Position erhalten');
+
+        const savedOn = page.waitForResponse(response => {
+            const url = new URL(response.url());
+            return url.pathname === '/api/setwebconfig' && url.searchParams.get('epg_jump_on_resume') === '1';
+        });
+        await page.evaluate(() => {
+            const setting = document.getElementById('epg_jump_on_resume');
+            setting.checked = true;
+            setting.dispatchEvent(new Event('change', {bubbles: true}));
+        });
+        assert.equal((await savedOn).ok(), true);
+        await page.clock.runFor(10);
+        await setEpgVisibility(page, 'hidden');
+        await page.clock.setSystemTime(fixtures.now + 600010);
+        await setEpgVisibility(page, 'visible');
+        await waitForDom(page, ({mode}) => {
+            const table = document.getElementById('fulltbl');
+            const config = JSON.parse(document.getElementById('modern-epg').dataset.epgConfig);
+            return table && table !== window.previousEpgTable && config.mode === mode && config.day === 0 &&
+                config.week === 0 && config.jumpOnResume === true;
+        }, {mode});
+        await page.clock.runFor(200);
+        assert.equal(loads.length, beforeLoads + 1);
+        assert.deepEqual(loads.at(-1), {mode, day: 0, week: 0});
+        assert.deepEqual(epgQueries.at(-1), {bref: fixtures.bouquet, epgmode: 'tv', day: 0, week: 0});
+        assert.equal(await page.locator('#epg_jump_on_resume').isChecked(), true);
+    });
+
     test(`${view}: wiederholtes Nachladen und Verlassen räumen Intervalle und Handler auf`, async t => {
         const { page } = await openEpg(t, mode);
         for (let reload = 0; reload < 3; reload++) {
@@ -990,6 +1127,7 @@ for (const mode of [1, 2]) {
             await waitForDom(page, () => document.getElementById('fulltbl') && document.getElementById('fulltbl') !== window.previousEpgTable);
             await page.clock.runFor(200);
             assert.equal(await intervalCount(page), 1);
+            assert.equal(await page.evaluate(() => window.epgVisibilityListeners.size), 1);
             const handlers = await page.evaluate(() => (jQuery._data(window, 'events').resize || []).filter(event => event.namespace === 'epgNowMarker').length);
             assert.equal(handlers, 1);
         }
@@ -1000,6 +1138,8 @@ for (const mode of [1, 2]) {
         });
         assert.equal(await intervalCount(page), 0);
         assert.equal(await page.locator('#other-view').evaluate(node => getComputedStyle(node).cursor), 'auto', 'EPG styles must not leak into other views');
+        assert.equal(await page.evaluate(() => window.epgVisibilityListeners.size), 0,
+            'Sichtbarkeits-Handler müssen beim Verlassen entfernt werden');
         const handlers = await page.evaluate(() => Object.values(jQuery._data(window, 'events') || {}).flat()
             .filter(event => /^epg/.test(event.namespace)).length);
         assert.equal(handlers, 0, 'EPG window handlers must be removed on leaving the view');
@@ -1008,6 +1148,7 @@ for (const mode of [1, 2]) {
         await page.evaluate(() => load_tvcontent_spin('ajax/multiepg?epgmode=tv'));
         await page.waitForSelector('#fulltbl');
         assert.equal(await intervalCount(page), 1);
+        assert.equal(await page.evaluate(() => window.epgVisibilityListeners.size), 1);
     });
 
     test(`${view}: Kalender lädt neue gerenderte Tagesdaten und setzt die Woche zurück`, async t => {

@@ -14,6 +14,7 @@
 #end if
 #set $now = $epgClock.time()
 #set $epgConfig = {'mode': $mode, 'day': $day, 'week': $week, 'epgmode': $epgmode, 'bref': $quote($bref), 'slotStart': $slot_start, 'first': $first, 'dateLabels': $getEpgDateLabels($tstrings), 'jumpNow': $epg_jump_now, 'jumpActiveService': $epg_jump_active_service, 'currentServiceRef': $current_service_ref}
+#set $epgConfig['jumpOnResume'] = $getVar('epg_jump_on_resume', True)
 #set $epgConfig['hourlyLines'] = $getVar('epg_hourly_lines', True)
 #set $epgConfig['channelLines'] = $getVar('epg_channel_lines', True)
 #if $mode == 2

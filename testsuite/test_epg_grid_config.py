@@ -54,6 +54,7 @@ class EpgGridConfigTests(unittest.TestCase):
                 with self.subTest(modern=modern, enabled=enabled):
                     cache = SimpleNamespace(mepgmode=SimpleNamespace(value=1), epg_jump_now=SimpleNamespace(value=False),
                                             epg_jump_active_service=SimpleNamespace(value=False),
+                                            epg_jump_on_resume=SimpleNamespace(value=enabled),
                                             **{key: SimpleNamespace(value=enabled) for key in KEYS})
                     namespace = {
                         'config': SimpleNamespace(OpenWebif=SimpleNamespace(webcache=cache)),
@@ -70,6 +71,10 @@ class EpgGridConfigTests(unittest.TestCase):
                             self.assertIs(result[key], enabled)
                         else:
                             self.assertNotIn(key, result)
+                    if modern:
+                        self.assertIs(result['epg_jump_on_resume'], enabled)
+                    else:
+                        self.assertNotIn('epg_jump_on_resume', result)
 
 
 if __name__ == '__main__':

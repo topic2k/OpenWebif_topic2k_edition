@@ -189,10 +189,28 @@ class EpgAutoJumpTestCase(unittest.TestCase):
 		self.assertIn('epg_autojump', tstrings)
 		self.assertIn('epg_jump_now', tstrings)
 		self.assertIn('epg_jump_active_service', tstrings)
+		self.assertIn('epg_jump_on_resume', tstrings)
 		self.assertNotIn('epg_jump_keep_running_visible', tstrings)
 		self.assertEqual(tstrings['epg_autojump'], "EPG Auto-Jump")
 		self.assertEqual(tstrings['epg_jump_now'], "Jump to current time in EPG")
 		self.assertEqual(tstrings['epg_jump_active_service'], "Jump to active channel in EPG")
+		self.assertEqual(tstrings['epg_jump_on_resume'], "Jump to current time after five minutes in the background")
+
+	def test_resume_option_defaults_to_enabled_and_is_rendered_under_auto_jump(self):
+		from pathlib import Path
+		import ast
+		root = Path(__file__).resolve().parents[1]
+		source = ast.parse((root / 'plugin/plugin.py').read_text(encoding='utf-8'))
+		assignment = next(node for node in source.body if isinstance(node, ast.Assign)
+						  and isinstance(node.targets[0], ast.Attribute)
+						  and node.targets[0].attr == 'epg_jump_on_resume')
+		self.assertIsInstance(assignment.value, ast.Call)
+		self.assertEqual(assignment.value.func.id, 'ConfigYesNo')
+		self.assertTrue(next(keyword.value.value for keyword in assignment.value.keywords if keyword.arg == 'default'))
+
+		main = (root / 'plugin/controllers/views/responsive/main.tmpl').read_text(encoding='utf-8')
+		self.assertIn("$tstrings['epg_jump_on_resume']", main)
+		self.assertIn('id="epg_jump_on_resume"', main)
 
 	def test_setwebconfig_epg_jump_keys(self):
 		from controllers.web import WebController
@@ -206,6 +224,7 @@ class EpgAutoJumpTestCase(unittest.TestCase):
 		components_config.config.OpenWebif.webcache = ConfigMock()
 		components_config.config.OpenWebif.webcache.epg_jump_now = ConfigItemMock(False)
 		components_config.config.OpenWebif.webcache.epg_jump_active_service = ConfigItemMock(False)
+		components_config.config.OpenWebif.webcache.epg_jump_on_resume = ConfigItemMock(False)
 
 		res1 = web.P_setwebconfig(FakeRequest("epg_jump_now", "true"))
 		self.assertEqual(res1, {"result": True})
@@ -219,6 +238,13 @@ class EpgAutoJumpTestCase(unittest.TestCase):
 		self.assertEqual(res3, {"result": True})
 		self.assertFalse(components_config.config.OpenWebif.webcache.epg_jump_now.value)
 
+		res4 = web.P_setwebconfig(FakeRequest("epg_jump_on_resume", "0"))
+		self.assertEqual(res4, {"result": True})
+		self.assertFalse(components_config.config.OpenWebif.webcache.epg_jump_on_resume.value)
+		res5 = web.P_setwebconfig(FakeRequest("epg_jump_on_resume", "true"))
+		self.assertEqual(res5, {"result": True})
+		self.assertTrue(components_config.config.OpenWebif.webcache.epg_jump_on_resume.value)
+
 
 class EpgAutoJumpIsolationTests(unittest.TestCase):
 	def test_mocks_are_removed_after_running_config_tests(self):
@@ -230,7 +256,7 @@ class EpgAutoJumpIsolationTests(unittest.TestCase):
 		result = unittest.TestResult()
 		unittest.defaultTestLoader.loadTestsFromTestCase(EpgAutoJumpTestCase).run(result)
 		self.assertTrue(result.wasSuccessful(), (result.errors, result.failures))
-		self.assertEqual(result.testsRun, 2)
+		self.assertEqual(result.testsRun, 3)
 		self.assertEqual(sys.modules, modules)
 		self.assertEqual(sys.meta_path, meta_path)
 		self.assertEqual(sys.path, path)

@@ -272,6 +272,8 @@ var reloadTimers = false;
 		var frame;
 		var jumpTimeout;
 		var visibleTimeout;
+		var resumeRequestVersion = 0;
+		var hiddenSince = document.visibilityState === 'hidden' ? Date.now() : null;
 		var guideGrid;
 		var timelineGrid;
 		var tooltipTimeout;
@@ -282,8 +284,31 @@ var reloadTimers = false;
 		function alive() {
 			return !disposed && document.getElementById('fulltbl') === tableNode;
 		}
+		function handleVisibilityChange() {
+			if (document.visibilityState === 'hidden') {
+				if (hiddenSince === null) hiddenSince = Date.now();
+				return;
+			}
+			if (hiddenSince === null) return;
+			var hiddenDuration = Date.now() - hiddenSince;
+			hiddenSince = null;
+			if (hiddenDuration < 300000 || config.jumpOnResume === false || !alive()) return;
+			var requestVersion = resumeRequestVersion;
+			var url = 'ajax/multiepg?bref=' + config.bref + '&day=0&epgmode=' + config.epgmode + '&week=0';
+			jQuery.ajax({url: url, dataType: 'html'}).done(function(markup) {
+				if (!alive() || requestVersion !== resumeRequestVersion || config.jumpOnResume === false || !jQuery('#tvcontent').length) return;
+				jQuery('#tvcontent').html(markup);
+				jQuery('#pt4').click();
+			});
+		}
+		function handleResumeSettings(event, options) {
+			if (!alive() || options.jumpOnResume === undefined) return;
+			config.jumpOnResume = options.jumpOnResume;
+			if (!config.jumpOnResume) resumeRequestVersion++;
+		}
 		function dispose() {
 			disposed = true;
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			if (stopMarker) stopMarker();
 			stopPiconContrast();
 			clearTimeout(jumpTimeout);
@@ -299,6 +324,8 @@ var reloadTimers = false;
 			if (disposeCurrent === dispose) disposeCurrent = null;
 		}
 		disposeCurrent = dispose;
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		jQuery(window).on('epgResumeSettings.epgTable', handleResumeSettings);
 		observer.observe(document.body, {childList: true, subtree: true});
 		reloadTimers = false;
 

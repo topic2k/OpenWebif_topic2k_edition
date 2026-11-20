@@ -369,6 +369,7 @@ class AjaxController(BaseController):
 		epg['epg_jump_now'] = 1 if config.OpenWebif.webcache.epg_jump_now.value else 0
 		epg['epg_jump_active_service'] = 1 if config.OpenWebif.webcache.epg_jump_active_service.value else 0
 		if modern:
+			epg['epg_jump_on_resume'] = config.OpenWebif.webcache.epg_jump_on_resume.value
 			epg['epg_hourly_lines'] = config.OpenWebif.webcache.epg_hourly_lines.value
 			epg['epg_channel_lines'] = config.OpenWebif.webcache.epg_channel_lines.value
 		current_service_ref = ""

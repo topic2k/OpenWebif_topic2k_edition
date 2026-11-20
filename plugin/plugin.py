@@ -145,6 +145,7 @@ config.OpenWebif.webcache.mintimerlist = ConfigYesNo(default=False)
 config.OpenWebif.webcache.minmovielist = ConfigYesNo(default=False)
 config.OpenWebif.webcache.epg_jump_now = ConfigYesNo(default=False)
 config.OpenWebif.webcache.epg_jump_active_service = ConfigYesNo(default=False)
+config.OpenWebif.webcache.epg_jump_on_resume = ConfigYesNo(default=True)
 config.OpenWebif.webcache.epg_hourly_lines = ConfigYesNo(default=True)
 config.OpenWebif.webcache.epg_channel_lines = ConfigYesNo(default=True)
 

@@ -1376,6 +1376,14 @@ function WebConfig() {
 		let val = $(this).is(":checked") ? '1' : '0'
 		$.get('api/setwebconfig?epg_jump_active_service=' + val);
 	});
+	$('#epg_jump_on_resume').change(function () {
+		let enabled = $(this).is(":checked");
+		$.get('api/setwebconfig?epg_jump_on_resume=' + (enabled ? '1' : '0'), function(result) {
+			if (result.result) {
+				$(window).trigger('epgResumeSettings', [{jumpOnResume: enabled}]);
+			}
+		});
+	});
 	$('#epg_hourly_lines, #epg_channel_lines').change(function () {
 		let key = this.id;
 		let enabled = $(this).is(":checked");

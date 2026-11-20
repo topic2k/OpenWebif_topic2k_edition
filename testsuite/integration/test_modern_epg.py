@@ -68,7 +68,8 @@ class RenderedModernEpgTests(unittest.TestCase):
                         'slot_start': slot_start, 'time': time, 'bouquets': [(BOUQUET, 'Testbouquet'), (OTHER_BOUQUET, 'Anderes Bouquet')],
                         'events': events, 'channelnames': dict.fromkeys(events, 'Gleicher Sendername'),
                         'channelrefs': {ref: ref for ref in events}, 'picons': dict.fromkeys(events, '/picon.png'),
-                        'epg_jump_now': 0, 'epg_jump_active_service': 0, 'current_service_ref': '',
+                        'epg_jump_now': 0, 'epg_jump_active_service': 0, 'epg_jump_on_resume': True,
+                        'current_service_ref': '',
                     }
                     if mode == 2:
                         context.update(timeline_start=slot_start, timeline_end=slot_start + 86400)

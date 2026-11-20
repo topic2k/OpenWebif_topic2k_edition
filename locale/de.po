@@ -2954,6 +2954,10 @@ msgid "Jump to active channel in EPG"
 msgstr "Beim Öffnen zum aktiven Sender springen"
 
 #: ../plugin/controllers/i18n.py
+msgid "Jump to current time after five minutes in the background"
+msgstr "Nach fünf Minuten im Hintergrund zur aktuellen Uhrzeit springen"
+
+#: ../plugin/controllers/i18n.py
 msgid "Manage tags"
 msgstr "Stichworte verwalten"
 
