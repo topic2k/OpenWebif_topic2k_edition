@@ -19,33 +19,22 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: '3.15'
 
-      - name: Build python 3.12
+      - name: Build python 3.15
         run: |
-          pip3 install Cheetah3
+          pip3 install CT3
           python -m compileall -l . -r 10 -q
           cheetah compile -R plugin
           python testsuite/evil_eval.py
 
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
-      - name: Build python 3.11
+      - name: Build python 3.14
         run: |
-          pip3 install Cheetah3
-          python -m compileall -l . -r 10 -q
-          cheetah compile -R plugin
-          python testsuite/evil_eval.py
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.10'
-
-      - name: Build python 3.10
-        run: |
-          pip3 install Cheetah3
+          pip3 install CT3
           python -m compileall -l . -r 10 -q
           cheetah compile -R plugin
           python testsuite/evil_eval.py
@@ -54,11 +43,11 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.9'
+          python-version: '3.13'
 
-      - name: Build python 3.9
+      - name: Build python 3.13
         run: |
-          pip3 install Cheetah3
+          pip3 install CT3
           python -m compileall -l . -r 10 -q
           cheetah compile -R plugin
           python testsuite/evil_eval.py

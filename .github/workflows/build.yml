@@ -33,60 +33,24 @@ jobs:
           cheetah compile -R plugin
           python testsuite/evil_eval.py
 
+      - name: Set up Python 3.15 for compatibility checks
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.15'
+
+      - name: Check Python 3.15 compatibility
+        run: |
+          pip3 install CT3
+          python -m compileall -l . -r 10 -q
+          cheetah compile -R plugin
+          python testsuite/evil_eval.py
+
       - name: Set up Python 3.13 for compatibility checks
         uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
       - name: Check Python 3.13 compatibility (OpenATV 7.6)
-        run: |
-          pip3 install CT3
-          python -m compileall -l . -r 10 -q
-          cheetah compile -R plugin
-          python testsuite/evil_eval.py
-
-      - name: Set up Python 3.12 for compatibility checks
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Check Python 3.12 compatibility
-        run: |
-          pip3 install CT3
-          python -m compileall -l . -r 10 -q
-          cheetah compile -R plugin
-          python testsuite/evil_eval.py
-
-      - name: Set up Python 3.11 for compatibility checks
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-
-      - name: Check Python 3.11 compatibility
-        run: |
-          pip3 install CT3
-          python -m compileall -l . -r 10 -q
-          cheetah compile -R plugin
-          python testsuite/evil_eval.py
-
-      - name: Set up Python 3.10 for compatibility checks
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.10'
-
-      - name: Check Python 3.10 compatibility
-        run: |
-          pip3 install CT3
-          python -m compileall -l . -r 10 -q
-          cheetah compile -R plugin
-          python testsuite/evil_eval.py
-
-      - name: Set up Python 3.9 for compatibility checks
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.9'
-
-      - name: Check Python 3.9 compatibility
         run: |
           pip3 install CT3
           python -m compileall -l . -r 10 -q

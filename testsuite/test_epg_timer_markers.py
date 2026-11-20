@@ -220,7 +220,8 @@ class EpgTimerMarkerTests(unittest.TestCase):
                     'getMultiEpg': lambda *args, **kwargs: {'modern': kwargs['modern']},
                     'config': SimpleNamespace(OpenWebif=SimpleNamespace(webcache=SimpleNamespace(
                         mepgmode=SimpleNamespace(value=0), epg_jump_now=SimpleNamespace(value=0),
-                        epg_jump_active_service=SimpleNamespace(value=0), epg_hourly_lines=SimpleNamespace(value=True),
+                        epg_jump_active_service=SimpleNamespace(value=0),
+                        epg_jump_on_resume=SimpleNamespace(value=False), epg_hourly_lines=SimpleNamespace(value=True),
                         epg_channel_lines=SimpleNamespace(value=True)))),
                     'NavigationInstance': SimpleNamespace(instance=None),
                 }

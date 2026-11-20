@@ -4,7 +4,7 @@ Die regulären Python- und JavaScript-Tests arbeiten mit lokalen Daten und Mocks
 
 ## Automatische CI-Prüfung
 
-Die Workflows `build.yml` (Push auf `main`) und `pull.yml` (Pull Requests gegen `main`) rufen den gemeinsamen Workflow `.github/workflows/tests.yml` auf, auch bei manuellem Start. Er prüft die Python-Tests mit Python 3.9 bis 3.13 und die JavaScript-Tests mit Node.js 22. Die bisherigen Builds starten nur nach erfolgreichen Tests; bei Testfehlern wird auch die Veröffentlichung verhindert. Checkout verwendet im Test-Workflow den Stand des auslösenden Ereignisses, bei Pull Requests den Merge-Stand.
+Die Workflows `build.yml` (Push auf `main`) und `pull.yml` (Pull Requests gegen `main`) rufen den gemeinsamen Workflow `.github/workflows/tests.yml` auf, auch bei manuellem Start. Er prüft die Python-Tests mit Python 3.13 bis 3.15 und die JavaScript-Tests mit Node.js 22. Die bisherigen Builds starten nur nach erfolgreichen Tests; bei Testfehlern wird auch die Veröffentlichung verhindert. Checkout verwendet im Test-Workflow den Stand des auslösenden Ereignisses, bei Pull Requests den Merge-Stand.
 
 Für lokale Gesamtläufe werden `CT3` (Cheetah), `requests` und Node.js benötigt. Installation der Python-Abhängigkeiten: `python -m pip install CT3 requests`. Node.js muss auch für den Python-Testlauf verfügbar sein, da einzelne Tests JavaScript-Unterprozesse prüfen. Die JavaScript-Tests benötigen keine npm-Installation. Die Muster `test_*.py` und `test_*.js` nehmen neue reguläre Tests automatisch auf; manuelle Receiver-Prüfskripte werden nicht gestartet. In der CI ist `OPENWEBIF_ALLOW_HARDWARE_TESTS=NO` gesetzt.
 

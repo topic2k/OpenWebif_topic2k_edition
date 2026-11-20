@@ -185,9 +185,18 @@ class ModernEpgChannelIdentityTests(unittest.TestCase):
                     'bref': quote(bouquet), 'slotStart': self.start, 'first': self.start,
                     'dateLabels': {'weekdays': [''] * 7, 'months': [''] * 12},
                     'jumpNow': 1, 'jumpActiveService': 1, 'currentServiceRef': REFS[1],
+                    'jumpOnResume': True,
                     'hourlyLines': True, 'channelLines': True,
                     **({'timelineEnd': self.start + 10800} if mode == 2 else {}),
                 })
+                context['epg_jump_on_resume'] = False
+                disabled_markup = str(self.template(searchList=[context]))
+                disabled_parser = EpgChannelParser()
+                disabled_parser.feed(disabled_markup)
+                disabled_root = next(attrs for _, attrs in disabled_parser.elements
+                                     if attrs.get('id') == 'modern-epg')
+                disabled_config = json.loads(disabled_root['data-epg-config'])
+                self.assertIs(disabled_config['jumpOnResume'], False)
                 prime_times = [int(attrs['data-time']) for _, attrs in parser.elements
                                if attrs.get('data-day') in ('201', '202', '203')]
                 expected = [int(time.mktime((2026, 10, 4, hour, 0, 0, -1, -1, -1)))
